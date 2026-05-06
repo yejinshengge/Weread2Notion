@@ -1,0 +1,291 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 420px;
+  max-width: 420px;
+  color: #16201b;
+  background: #f7f8f5;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.popup-shell {
+  display: flex;
+  min-height: 540px;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 12px;
+  border-bottom: 1px solid #dde4dc;
+  background: #ffffff;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0;
+}
+
+.topbar p {
+  margin-top: 5px;
+  color: #68736d;
+  font-size: 12px;
+}
+
+.icon-button,
+.ghost {
+  min-height: 32px;
+  padding: 0 11px;
+  color: #2c3a33;
+  background: #eef2ed;
+}
+
+.secondary {
+  min-height: 34px;
+  padding: 0 13px;
+  color: #1a2c22;
+  background: #dfe9df;
+}
+
+.primary {
+  min-height: 36px;
+  padding: 0 15px;
+  color: #ffffff;
+  background: #1f6b46;
+}
+
+.status {
+  display: grid;
+  gap: 6px;
+  padding: 12px 18px;
+  font-size: 12px;
+  border-bottom: 1px solid #dde4dc;
+}
+
+.status span,
+.status strong {
+  line-height: 1.35;
+}
+
+.status.ok {
+  color: #205333;
+  background: #edf7ef;
+}
+
+.status.warn {
+  color: #7a4e0a;
+  background: #fff4dc;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px;
+}
+
+.empty {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  padding: 24px;
+  color: #68736d;
+  text-align: center;
+}
+
+.book-list {
+  display: grid;
+  max-height: 325px;
+  overflow: auto;
+  border-top: 1px solid #e3e8e1;
+  border-bottom: 1px solid #e3e8e1;
+}
+
+.book-row {
+  display: grid;
+  grid-template-columns: 18px 38px minmax(0, 1fr) 44px 58px;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 9px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid #edf0eb;
+}
+
+.book-row img {
+  width: 34px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #e6ebe5;
+}
+
+.book-main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.book-main strong,
+.book-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-main strong {
+  font-size: 13px;
+}
+
+.book-main small {
+  color: #707a74;
+  font-size: 11px;
+}
+
+.progress {
+  color: #526057;
+  font-size: 12px;
+  text-align: right;
+}
+
+.badge {
+  display: inline-grid;
+  min-height: 22px;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #1d4f34;
+  background: #e4f1e7;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid #e3e8e1;
+}
+
+.summary div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f2f5f1;
+  text-align: center;
+}
+
+.summary b {
+  font-size: 17px;
+}
+
+.summary span,
+.summary summary,
+.summary li {
+  color: #68736d;
+  font-size: 12px;
+}
+
+.summary details {
+  grid-column: 1 / -1;
+}
+
+.summary ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.sync-progress {
+  display: grid;
+  gap: 8px;
+  padding: 12px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid #e3e8e1;
+}
+
+.progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1d3c2c;
+  font-size: 12px;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4eae3;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1f6b46;
+  transition: width 180ms ease;
+}
+
+.sync-progress p,
+.sync-progress small {
+  overflow: hidden;
+  color: #68736d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding: 14px 18px;
+  background: #ffffff;
+  border-top: 1px solid #dde4dc;
+}
+
+.footer span {
+  color: #68736d;
+  font-size: 12px;
+}

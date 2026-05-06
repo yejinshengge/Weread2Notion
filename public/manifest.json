@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "WeRead to Notion",
+  "description": "同步微信读书阅读记录到指定 Notion 数据库。",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "WeRead to Notion",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://weread.qq.com/*",
+    "https://api.notion.com/*"
+  ]
+}

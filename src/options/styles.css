@@ -1,0 +1,295 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 720px;
+  color: #17231d;
+  background: #f6f7f3;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+a {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.settings-shell {
+  width: min(980px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 0 20px;
+}
+
+.hero p,
+.hero h1 {
+  margin: 0;
+}
+
+.hero p {
+  color: #5c6a62;
+  font-size: 13px;
+}
+
+.hero h1 {
+  margin-top: 4px;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.hero span {
+  color: #6a746e;
+  font-size: 13px;
+}
+
+.notice {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.notice.ok {
+  color: #1f5736;
+  background: #eaf6ed;
+}
+
+.notice.error {
+  color: #8c2b24;
+  background: #fee9e6;
+}
+
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border-radius: 6px;
+  box-shadow: 0 10px 26px rgb(20 34 27 / 18%);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.toast.ok {
+  color: #ffffff;
+  background: #1f6b46;
+}
+
+.toast.error {
+  color: #ffffff;
+  background: #8c2b24;
+}
+
+.panel {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid #dce4dc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.panel > label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+label span,
+.field-heading label,
+.hint,
+.actions p,
+.mapping-row small,
+.field-error {
+  color: #68746d;
+  font-size: 13px;
+}
+
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  color: #1f6b46;
+  border: 1px solid #b8d7c3;
+  border-radius: 6px;
+  background: #eff8f1;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  color: #17231d;
+  border: 1px solid #cdd8cf;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+input:focus,
+select:focus {
+  border-color: #2d7b51;
+  outline: 2px solid #dcefe3;
+}
+
+.secondary-link:focus-visible {
+  outline: 2px solid #dcefe3;
+  outline-offset: 2px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.actions p {
+  margin: 0;
+}
+
+.primary {
+  min-height: 40px;
+  padding: 0 16px;
+  color: #ffffff;
+  background: #1f6b46;
+}
+
+.field-error {
+  margin: 12px 0 0;
+  color: #8c2b24;
+}
+
+.hint {
+  margin: -6px 0 16px;
+}
+
+.mapping-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 150px minmax(240px, 1fr) 120px minmax(180px, 240px);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #edf1ec;
+  border-radius: 6px;
+  background: #fbfcfa;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.switch input,
+.overwrite-toggle input,
+.toggle-row input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.overwrite-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #47554d;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.overwrite-toggle.muted {
+  color: #87928b;
+}
+
+.mapping-row small {
+  overflow-wrap: anywhere;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  body {
+    min-width: 0;
+  }
+
+  .settings-shell {
+    width: calc(100vw - 28px);
+  }
+
+  .hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mapping-row {
+    grid-template-columns: 1fr;
+  }
+
+  .field-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
