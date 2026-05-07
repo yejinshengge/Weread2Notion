@@ -1,7 +1,14 @@
-import { getAllowedTypes, isCompatibleProperty } from "../shared/fields";
+import {
+  getBookAllowedTypes,
+  getHighlightAllowedTypes,
+  isBookEntryCompatible,
+  isHighlightEntryCompatible
+} from "../shared/fields";
 import type {
   DatabaseProperty,
   ExtensionSettings,
+  FieldMappingEntry,
+  HighlightSyncField,
   FieldMapping,
   NotionPropertyType,
   SyncProgress,
@@ -138,7 +145,7 @@ export async function syncBookHighlightsToNotion(
 
   try {
     const existingPageId = await findExistingHighlightPage(settings, book);
-    const payload = buildHighlightPagePayload(settings, book, notes);
+    const payload = buildHighlightPagePayload(settings, book, notes, { existingPage: Boolean(existingPageId) });
 
     if (existingPageId) {
       await notionRequest(settings.notionToken, `/pages/${existingPageId}`, {
@@ -194,14 +201,74 @@ export function getMappingError(
   if (!property) {
     return "字段不存在";
   }
-  if (!isCompatibleProperty(field, property.type)) {
-    return `字段类型需为 ${getAllowedTypes(field).join(" / ")}`;
+  if (!getBookAllowedTypes(field).includes(property.type)) {
+    return `字段类型需为 ${getBookAllowedTypes(field).join(" / ")}`;
   }
   return null;
 }
 
+export function getBookFieldMappingError(
+  entry: FieldMappingEntry<SyncField>,
+  properties: DatabaseProperty[]
+): string | null {
+  return getFieldMappingEntryError(entry, properties, (field) => getBookAllowedTypes(field), isBookEntryCompatible);
+}
+
+export function getHighlightFieldMappingError(
+  entry: FieldMappingEntry<HighlightSyncField>,
+  properties: DatabaseProperty[]
+): string | null {
+  return getFieldMappingEntryError(
+    entry,
+    properties,
+    (field) => getHighlightAllowedTypes(field),
+    isHighlightEntryCompatible
+  );
+}
+
 export function getTitleProperty(properties: DatabaseProperty[]): DatabaseProperty | null {
   return properties.find((property) => property.type === "title") ?? null;
+}
+
+function getFieldMappingEntryError<TSource extends string>(
+  entry: FieldMappingEntry<TSource>,
+  properties: DatabaseProperty[],
+  getAllowedTypes: (field: TSource) => NotionPropertyType[],
+  isCompatible: (entry: FieldMappingEntry<TSource>, propertyType: NotionPropertyType) => boolean
+): string | null {
+  if (!entry.propertyName) {
+    return "请选择 Notion 字段";
+  }
+  if (entry.sourceType === "field" && !entry.sourceField) {
+    return "请选择同步内容";
+  }
+  if (entry.sourceType === "custom" && !entry.customValue.trim()) {
+    return "请输入自定义内容";
+  }
+
+  const property = properties.find((item) => item.name === entry.propertyName);
+  if (!property) {
+    return "字段不存在";
+  }
+  if (!isCompatible(entry, property.type)) {
+    const allowedTypes = entry.sourceType === "field" && entry.sourceField ? getAllowedTypes(entry.sourceField) : [];
+    return allowedTypes.length > 0 ? `字段类型需为 ${allowedTypes.join(" / ")}` : "该 Notion 字段类型不支持写入";
+  }
+  if (entry.sourceType === "custom") {
+    return getCustomValueError(entry.customValue, property.type);
+  }
+  return null;
+}
+
+function getCustomValueError(value: string, propertyType: NotionPropertyType): string | null {
+  const trimmed = value.trim();
+  if (propertyType === "number" && !Number.isFinite(Number(trimmed))) {
+    return "自定义内容需要是数字";
+  }
+  if (propertyType === "checkbox" && parseBooleanValue(trimmed) === null) {
+    return "自定义内容需要是 true/false、是/否 或 1/0";
+  }
+  return null;
 }
 
 function ensureSyncSettings(settings: ExtensionSettings): void {
@@ -213,12 +280,12 @@ function ensureSyncSettings(settings: ExtensionSettings): void {
     throw new Error("目标数据库必须包含 title 类型字段");
   }
 
-  const idMapping = settings.mappings.wereadId;
-  if (!idMapping.enabled || !idMapping.propertyName) {
+  const idMapping = getBookIdMapping(settings);
+  if (!idMapping) {
     throw new Error("请先映射 WeRead ID 字段以避免重复同步");
   }
 
-  const idMappingError = getMappingError("wereadId", idMapping, settings.databaseProperties);
+  const idMappingError = getBookFieldMappingError(idMapping, settings.databaseProperties);
   if (idMappingError) {
     throw new Error(`WeRead ID 字段配置有误：${idMappingError}`);
   }
@@ -235,15 +302,16 @@ function ensureHighlightSyncSettings(settings: ExtensionSettings): void {
 }
 
 async function findExistingPage(settings: ExtensionSettings, book: WeReadBook): Promise<string | null> {
-  const property = getMappedProperty(settings, "wereadId");
+  const mapping = getBookIdMapping(settings);
+  if (!mapping) {
+    return null;
+  }
+  const property = getMappedProperty(settings.databaseProperties, mapping, getBookFieldMappingError);
   if (!property) {
     return null;
   }
 
-  const filter =
-    property.type === "select"
-      ? { property: property.name, select: { equals: book.bookId } }
-      : { property: property.name, rich_text: { equals: book.bookId } };
+  const filter = buildEqualsFilter(property, book.bookId);
 
   const response = await notionRequest<NotionQueryResponse>(settings.notionToken, `/databases/${settings.databaseId}/query`, {
     method: "POST",
@@ -257,16 +325,17 @@ async function findExistingPage(settings: ExtensionSettings, book: WeReadBook): 
 }
 
 async function findExistingHighlightPage(settings: ExtensionSettings, book: WeReadNotebookBook): Promise<string | null> {
-  const idProperty = getHighlightBookIdProperty(settings);
+  const idMapping = getHighlightBookIdMapping(settings);
+  const idProperty = idMapping
+    ? getMappedProperty(settings.highlightDatabaseProperties, idMapping, getHighlightFieldMappingError)
+    : null;
   const titleProperty = getTitleProperty(settings.highlightDatabaseProperties);
   if (!titleProperty) {
     return null;
   }
 
   const filter = idProperty
-    ? idProperty.type === "select"
-      ? { property: idProperty.name, select: { equals: book.bookId } }
-      : { property: idProperty.name, rich_text: { equals: book.bookId } }
+    ? buildEqualsFilter(idProperty, book.bookId)
     : { property: titleProperty.name, title: { equals: getHighlightPageTitle(book) } };
 
   const response = await notionRequest<NotionQueryResponse>(
@@ -302,16 +371,15 @@ function buildPagePayload(
     };
   }
 
-  for (const field of Object.keys(settings.mappings) as SyncField[]) {
-    const mapping = settings.mappings[field];
-    if (options.existingPage && (field === "wereadId" || !mapping.overwriteOnUpdate)) {
+  for (const mapping of settings.fieldMappings) {
+    if (options.existingPage && (mapping.sourceField === "wereadId" || !mapping.overwriteOnUpdate)) {
       continue;
     }
-    const mappedProperty = getMappedProperty(settings, field);
+    const mappedProperty = getMappedProperty(settings.databaseProperties, mapping, getBookFieldMappingError);
     if (!mappedProperty) {
       continue;
     }
-    const propertyValue = buildPropertyValue(field, mappedProperty.type, book);
+    const propertyValue = buildBookPropertyValue(mapping, mappedProperty.type, book);
     if (propertyValue) {
       properties[mappedProperty.name] = propertyValue;
     }
@@ -322,8 +390,7 @@ function buildPagePayload(
     payload.properties = properties;
   }
 
-  const canUpdateCover = !options.existingPage || Boolean(settings.mappings.cover?.overwriteOnUpdate);
-  if (settings.useNotionCover && book.cover && canUpdateCover) {
+  if (settings.useNotionCover && book.cover) {
     payload.cover = {
       type: "external",
       external: { url: book.cover }
@@ -336,7 +403,8 @@ function buildPagePayload(
 function buildHighlightPagePayload(
   settings: ExtensionSettings,
   book: WeReadNotebookBook,
-  notes: WeReadHighlightNote[]
+  notes: WeReadHighlightNote[],
+  options: { existingPage?: boolean } = {}
 ): NotionPagePayload & { children: NotionBlock[] } {
   const titleProperty = getTitleProperty(settings.highlightDatabaseProperties);
   if (!titleProperty) {
@@ -349,22 +417,30 @@ function buildHighlightPagePayload(
     }
   };
 
-  addOptionalHighlightProperty(settings, properties, "WeRead ID", book.bookId);
-  addOptionalHighlightProperty(settings, properties, "Book ID", book.bookId);
-  addOptionalHighlightProperty(settings, properties, "作者", book.author);
-  addOptionalHighlightProperty(settings, properties, "Author", book.author);
-  addOptionalHighlightProperty(settings, properties, "微信读书链接", book.url);
-  addOptionalHighlightProperty(settings, properties, "URL", book.url);
-  addOptionalHighlightProperty(settings, properties, "划线数量", notes.filter((note) => note.original).length);
-  addOptionalHighlightProperty(settings, properties, "想法数量", notes.filter((note) => note.thought).length);
-  addOptionalHighlightProperty(settings, properties, "最后同步", new Date().toISOString());
+  for (const mapping of settings.highlightFieldMappings) {
+    if (options.existingPage && mapping.sourceField === "bookId" && !mapping.overwriteOnUpdate) {
+      continue;
+    }
+    const mappedProperty = getMappedProperty(
+      settings.highlightDatabaseProperties,
+      mapping,
+      getHighlightFieldMappingError
+    );
+    if (!mappedProperty) {
+      continue;
+    }
+    const propertyValue = buildHighlightPropertyValue(mapping, mappedProperty.type, book, notes);
+    if (propertyValue) {
+      properties[mappedProperty.name] = propertyValue;
+    }
+  }
 
   const payload: NotionPagePayload & { children: NotionBlock[] } = {
     properties,
     children: buildHighlightPageChildren(book, notes)
   };
 
-  if (book.cover) {
+  if (settings.useHighlightNotionCover && book.cover) {
     payload.cover = {
       type: "external",
       external: { url: book.cover }
@@ -376,52 +452,6 @@ function buildHighlightPagePayload(
 
 function getHighlightPageTitle(book: WeReadNotebookBook): string {
   return `《${book.title}》划线与想法`;
-}
-
-function addOptionalHighlightProperty(
-  settings: ExtensionSettings,
-  properties: Record<string, NotionPropertyValue>,
-  propertyName: string,
-  value: string | number | undefined
-): void {
-  if (value === undefined || value === "") {
-    return;
-  }
-
-  const property = settings.highlightDatabaseProperties.find((item) => item.name === propertyName);
-  if (!property) {
-    return;
-  }
-
-  const stringValue = String(value);
-  switch (property.type) {
-    case "rich_text":
-      properties[property.name] = { rich_text: [{ text: { content: stringValue } }] };
-      break;
-    case "select":
-      properties[property.name] = { select: { name: stringValue } };
-      break;
-    case "url":
-      properties[property.name] = { url: stringValue };
-      break;
-    case "number":
-      if (typeof value === "number" && Number.isFinite(value)) {
-        properties[property.name] = { number: value };
-      }
-      break;
-    case "date":
-      properties[property.name] = { date: { start: stringValue } };
-      break;
-  }
-}
-
-function getHighlightBookIdProperty(settings: ExtensionSettings): DatabaseProperty | null {
-  const preferredNames = ["WeRead ID", "Book ID", "BookId", "bookId", "微信读书ID"];
-  return (
-    settings.highlightDatabaseProperties.find(
-      (property) => preferredNames.includes(property.name) && ["rich_text", "select"].includes(property.type)
-    ) ?? null
-  );
 }
 
 function buildHighlightPageChildren(book: WeReadNotebookBook, notes: WeReadHighlightNote[]): NotionBlock[] {
@@ -578,38 +608,61 @@ function hasPagePayloadChanges(payload: NotionPagePayload): boolean {
   return Boolean((payload.properties && Object.keys(payload.properties).length > 0) || payload.cover);
 }
 
-function getMappedProperty(settings: ExtensionSettings, field: SyncField): DatabaseProperty | null {
-  const mapping = settings.mappings[field];
-  if (!mapping.enabled || !mapping.propertyName) {
+function getMappedProperty<TSource extends string>(
+  properties: DatabaseProperty[],
+  mapping: FieldMappingEntry<TSource>,
+  getError: (entry: FieldMappingEntry<TSource>, properties: DatabaseProperty[]) => string | null
+): DatabaseProperty | null {
+  if (!mapping.propertyName) {
     return null;
   }
-  const property = settings.databaseProperties.find((item) => item.name === mapping.propertyName);
-  if (!property || getMappingError(field, mapping, settings.databaseProperties)) {
+  const property = properties.find((item) => item.name === mapping.propertyName);
+  if (!property || getError(mapping, properties)) {
     return null;
   }
   return property;
 }
 
-function buildPropertyValue(
-  field: SyncField,
+function buildBookPropertyValue(
+  mapping: FieldMappingEntry<SyncField>,
   type: NotionPropertyType,
   book: WeReadBook
 ): NotionPropertyValue | null {
-  const value = getBookFieldValue(field, book);
+  const value = getBookEntryValue(mapping, book);
+  return buildPropertyValue(type, value, book.title);
+}
+
+function buildHighlightPropertyValue(
+  mapping: FieldMappingEntry<HighlightSyncField>,
+  type: NotionPropertyType,
+  book: WeReadNotebookBook,
+  notes: WeReadHighlightNote[]
+): NotionPropertyValue | null {
+  const value = getHighlightEntryValue(mapping, book, notes);
+  return buildPropertyValue(type, value, book.title);
+}
+
+function buildPropertyValue(
+  type: NotionPropertyType,
+  value: string | number | boolean | undefined,
+  fallbackName: string
+): NotionPropertyValue | null {
   if (value === undefined || value === "") {
     return null;
   }
 
   switch (type) {
-    case "number":
-      return { number: typeof value === "number" ? value : Number(value) };
+    case "number": {
+      const numericValue = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(numericValue) ? { number: numericValue } : null;
+    }
     case "url":
       return { url: String(value) };
     case "files":
       return {
         files: [
           {
-            name: `${book.title} 封面`,
+            name: fallbackName,
             type: "external",
             external: { url: String(value) }
           }
@@ -621,10 +674,66 @@ function buildPropertyValue(
       return { status: { name: String(value) } };
     case "date":
       return { date: { start: String(value) } };
+    case "checkbox": {
+      const checkboxValue = typeof value === "boolean" ? value : parseBooleanValue(String(value));
+      return checkboxValue === null ? null : { checkbox: checkboxValue };
+    }
+    case "multi_select":
+      return {
+        multi_select: String(value)
+          .split(/[,，]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .map((name) => ({ name }))
+      };
     case "rich_text":
       return { rich_text: [{ text: { content: String(value) } }] };
     default:
       return null;
+  }
+}
+
+function getBookEntryValue(
+  mapping: FieldMappingEntry<SyncField>,
+  book: WeReadBook
+): string | number | boolean | undefined {
+  if (mapping.sourceType === "custom") {
+    return mapping.customValue;
+  }
+  if (!mapping.sourceField) {
+    return undefined;
+  }
+  return getBookFieldValue(mapping.sourceField, book);
+}
+
+function getHighlightEntryValue(
+  mapping: FieldMappingEntry<HighlightSyncField>,
+  book: WeReadNotebookBook,
+  notes: WeReadHighlightNote[]
+): string | number | boolean | undefined {
+  if (mapping.sourceType === "custom") {
+    return mapping.customValue;
+  }
+
+  switch (mapping.sourceField) {
+    case "cover":
+      return book.cover;
+    case "author":
+      return book.author;
+    case "url":
+      return book.url;
+    case "bookId":
+      return book.bookId;
+    case "noteCount":
+      return notes.length;
+    case "bookmarkCount":
+      return notes.filter((note) => note.original).length;
+    case "reviewCount":
+      return notes.filter((note) => note.thought).length;
+    case "lastSyncedAt":
+      return new Date().toISOString();
+    default:
+      return undefined;
   }
 }
 
@@ -647,6 +756,40 @@ function getBookFieldValue(field: SyncField, book: WeReadBook): string | number 
     case "wereadId":
       return book.bookId;
   }
+}
+
+function getBookIdMapping(settings: ExtensionSettings): FieldMappingEntry<SyncField> | null {
+  return settings.fieldMappings.find((entry) => entry.sourceType === "field" && entry.sourceField === "wereadId") ?? null;
+}
+
+function getHighlightBookIdMapping(settings: ExtensionSettings): FieldMappingEntry<HighlightSyncField> | null {
+  return (
+    settings.highlightFieldMappings.find((entry) => entry.sourceType === "field" && entry.sourceField === "bookId") ?? null
+  );
+}
+
+function buildEqualsFilter(property: DatabaseProperty, value: string): Record<string, unknown> {
+  switch (property.type) {
+    case "select":
+      return { property: property.name, select: { equals: value } };
+    case "status":
+      return { property: property.name, status: { equals: value } };
+    case "title":
+      return { property: property.name, title: { equals: value } };
+    default:
+      return { property: property.name, rich_text: { equals: value } };
+  }
+}
+
+function parseBooleanValue(value: string): boolean | null {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "yes", "y", "1", "是", "对"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "no", "n", "0", "否", "不"].includes(normalized)) {
+    return false;
+  }
+  return null;
 }
 
 function mapDatabaseProperties(properties: NotionDatabaseResponse["properties"]): DatabaseProperty[] {

@@ -86,8 +86,9 @@ async function publishSyncProgress(progress: SyncProgress): Promise<void> {
 }
 
 function isStartReadAtEnabled(settings: Awaited<ReturnType<typeof getSettings>>): boolean {
-  const mapping = settings.mappings.startReadAt;
-  return Boolean(mapping?.enabled && mapping.propertyName);
+  return settings.fieldMappings.some(
+    (mapping) => mapping.sourceType === "field" && mapping.sourceField === "startReadAt" && mapping.propertyName
+  );
 }
 
 function getErrorMessage(error: unknown): string {

@@ -1,9 +1,8 @@
 import "./styles.css";
-import { FIELD_LABELS, SYNC_FIELDS, getAllowedTypes } from "../shared/fields";
 import { sendBackgroundMessage } from "../shared/runtime";
-import type { DatabaseProperty, ExtensionSettings, SyncField } from "../shared/types";
+import type { ExtensionSettings } from "../shared/types";
 import { getSettings, saveSettings } from "../storage";
-import { getMappingError, getTitleProperty } from "../services/notion";
+import { getTitleProperty } from "../services/notion";
 
 interface OptionsState {
   settings: ExtensionSettings | null;
@@ -60,7 +59,7 @@ function render(): void {
         </div>
         <div class="hero-actions">
           <span>${settings.lastValidatedAt ? `上次验证：${formatDate(settings.lastValidatedAt)}` : "尚未验证数据库"}</span>
-          <button class="secondary-link" id="open-sync-page" type="button">打开功能页</button>
+          <button class="secondary-link" id="open-sync-page" type="button">打开书架同步</button>
           <button class="secondary-link" id="open-highlights-page" type="button">打开划线同步</button>
         </div>
       </header>
@@ -86,7 +85,7 @@ function render(): void {
           <button id="validate-database" class="primary" ${state.validating ? "disabled" : ""}>
             ${state.validating ? "验证中..." : "验证数据库"}
           </button>
-          <p>${propertiesLoaded ? `已读取 ${settings.databaseProperties.length} 个字段` : "验证后可配置字段映射"}</p>
+          <p>${propertiesLoaded ? `已读取 ${settings.databaseProperties.length} 个字段` : "验证后到书架同步页配置字段"}</p>
         </div>
         ${
           propertiesLoaded && !titleProperty
@@ -125,22 +124,6 @@ function render(): void {
         }
       </section>
 
-      <section class="panel">
-        <h2>同步字段</h2>
-        <p class="hint">${
-          titleProperty
-            ? `书名将写入 title 字段「${escapeHtml(titleProperty.name)}」。其余字段可按需启用并映射到兼容的 Notion 字段。`
-            : "书名将写入数据库的 title 字段。其余字段可按需启用并映射到兼容的 Notion 字段。"
-        }</p>
-        <div class="mapping-list">
-          ${SYNC_FIELDS.map((field) => renderMappingRow(field, settings)).join("")}
-        </div>
-        <label class="toggle-row">
-          <input id="use-notion-cover" type="checkbox" ${settings.useNotionCover ? "checked" : ""} />
-          <span>将微信读书封面设置为 Notion 页面封面</span>
-        </label>
-      </section>
-
       <footer class="footer">
         <button id="save-settings" class="primary" ${state.saving ? "disabled" : ""}>
           ${state.saving ? "保存中..." : "保存设置"}
@@ -176,90 +159,12 @@ function renderToast(): string {
   `;
 }
 
-function renderMappingRow(field: SyncField, settings: ExtensionSettings): string {
-  const mapping = settings.mappings[field];
-  const canConfigureOverwrite = field !== "wereadId";
-  const options = getCompatibleProperties(field, settings.databaseProperties)
-    .map(
-      (property) =>
-        `<option value="${escapeAttribute(property.name)}" ${
-          property.name === mapping.propertyName ? "selected" : ""
-        }>${escapeHtml(property.name)} · ${property.type}</option>`
-    )
-    .join("");
-  const error = getMappingError(field, mapping, settings.databaseProperties);
-  const allowedTypes = getAllowedTypes(field).join(" / ");
-
-  return `
-    <div class="mapping-row">
-      <label class="switch">
-        <input type="checkbox" data-map-enabled="${field}" ${mapping.enabled ? "checked" : ""} />
-        <span>${FIELD_LABELS[field]}</span>
-      </label>
-      <select data-map-property="${field}" ${mapping.enabled ? "" : "disabled"}>
-        <option value="">选择字段</option>
-        ${options}
-      </select>
-      <label class="overwrite-toggle ${canConfigureOverwrite ? "" : "muted"}">
-        <input
-          type="checkbox"
-          data-map-overwrite="${field}"
-          ${mapping.overwriteOnUpdate ? "checked" : ""}
-          ${canConfigureOverwrite ? "" : "disabled"}
-        />
-        <span>${canConfigureOverwrite ? "覆盖更新" : "用于去重"}</span>
-      </label>
-      <small>${error ? escapeHtml(error) : `兼容：${escapeHtml(allowedTypes)}`}</small>
-    </div>
-  `;
-}
-
 function bindEvents(): void {
   document.querySelector("#open-sync-page")?.addEventListener("click", openSyncPage);
   document.querySelector("#open-highlights-page")?.addEventListener("click", openHighlightsPage);
   document.querySelector("#validate-database")?.addEventListener("click", validateDatabaseFromForm);
   document.querySelector("#validate-highlight-database")?.addEventListener("click", validateHighlightDatabaseFromForm);
   document.querySelector("#save-settings")?.addEventListener("click", saveSettingsFromForm);
-
-  document.querySelectorAll<HTMLInputElement>("input[data-map-enabled]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const field = input.dataset.mapEnabled as SyncField | undefined;
-      if (!field || !state.settings) {
-        return;
-      }
-      state.settings.mappings[field].enabled = input.checked;
-      render();
-    });
-  });
-
-  document.querySelectorAll<HTMLSelectElement>("select[data-map-property]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const field = select.dataset.mapProperty as SyncField | undefined;
-      if (!field || !state.settings) {
-        return;
-      }
-      state.settings.mappings[field].propertyName = select.value;
-      render();
-    });
-  });
-
-  document.querySelectorAll<HTMLInputElement>("input[data-map-overwrite]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const field = input.dataset.mapOverwrite as SyncField | undefined;
-      if (!field || !state.settings || field === "wereadId") {
-        return;
-      }
-      state.settings.mappings[field].overwriteOnUpdate = input.checked;
-      render();
-    });
-  });
-
-  document.querySelector<HTMLInputElement>("#use-notion-cover")?.addEventListener("change", (event) => {
-    if (!state.settings) {
-      return;
-    }
-    state.settings.useNotionCover = (event.currentTarget as HTMLInputElement).checked;
-  });
 }
 
 function openSyncPage(): void {
@@ -345,20 +250,8 @@ async function saveSettingsFromForm(): Promise<void> {
     ...state.settings,
     notionToken: readInputValue("#notion-token"),
     databaseUrl: readInputValue("#database-url"),
-    highlightDatabaseUrl: readInputValue("#highlight-database-url"),
-    useNotionCover: Boolean(document.querySelector<HTMLInputElement>("#use-notion-cover")?.checked),
-    mappings: { ...state.settings.mappings }
+    highlightDatabaseUrl: readInputValue("#highlight-database-url")
   };
-
-  for (const field of SYNC_FIELDS) {
-    nextSettings.mappings[field] = {
-      enabled: Boolean(document.querySelector<HTMLInputElement>(`input[data-map-enabled="${field}"]`)?.checked),
-      propertyName: document.querySelector<HTMLSelectElement>(`select[data-map-property="${field}"]`)?.value ?? "",
-      overwriteOnUpdate:
-        field !== "wereadId" &&
-        Boolean(document.querySelector<HTMLInputElement>(`input[data-map-overwrite="${field}"]`)?.checked)
-    };
-  }
 
   state.settings = nextSettings;
   state.saving = true;
@@ -388,11 +281,6 @@ function showToast(message: string, type: "ok" | "error"): void {
     render();
   }, 2600);
   render();
-}
-
-function getCompatibleProperties(field: SyncField, properties: DatabaseProperty[]): DatabaseProperty[] {
-  const allowedTypes = getAllowedTypes(field);
-  return properties.filter((property) => allowedTypes.includes(property.type));
 }
 
 function readInputValue(selector: string): string {

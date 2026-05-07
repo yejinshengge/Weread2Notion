@@ -4,7 +4,7 @@ type AppTab = "sync" | "highlights" | "settings";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const tabs: Array<{ id: AppTab; label: string; src: string }> = [
-  { id: "sync", label: "功能页", src: chrome.runtime.getURL("function.html") },
+  { id: "sync", label: "书架同步", src: chrome.runtime.getURL("function.html") },
   { id: "highlights", label: "划线同步", src: chrome.runtime.getURL("highlights.html") },
   { id: "settings", label: "配置页", src: chrome.runtime.getURL("options.html") }
 ];
@@ -107,5 +107,5 @@ function getInitialTab(): AppTab {
 }
 
 function getTabLabel(tab: AppTab): string {
-  return tabs.find((item) => item.id === tab)?.label ?? "功能页";
+  return tabs.find((item) => item.id === tab)?.label ?? "书架同步";
 }

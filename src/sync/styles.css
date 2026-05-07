@@ -11,7 +11,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -32,6 +33,23 @@ button:active:not(:disabled) {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+select,
+input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  color: #16201b;
+  border: 1px solid #cdd8cf;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+input:disabled {
+  color: #8a948e;
+  border-color: #dbe2dc;
+  background: #eef2ed;
 }
 
 .sync-shell {
@@ -122,6 +140,125 @@ p {
 .status.warn {
   color: #7a4e0a;
   background: #fff4dc;
+}
+
+.field-config {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e3e8e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.field-config-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.field-config-summary::marker {
+  color: #526057;
+}
+
+.field-count {
+  flex: 0 0 auto;
+  color: #68736d;
+  font-size: 12px;
+}
+
+.field-config-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.field-config-header,
+.field-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-config h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.field-config p,
+.field-entry small,
+.toggle-row span {
+  color: #68736d;
+  font-size: 12px;
+}
+
+.field-entry-list {
+  display: grid;
+  gap: 10px;
+}
+
+.field-entry-header {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.9fr) minmax(190px, 1fr) 104px 62px;
+  gap: 10px;
+  padding: 0 10px;
+  color: #68736d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field-entry {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.9fr) minmax(190px, 1fr) 104px 62px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #edf1ec;
+  border-radius: 6px;
+  background: #fbfcfa;
+}
+
+.field-entry small {
+  grid-column: 1 / -1;
+}
+
+.field-entry small.field-error {
+  color: #8c2b24;
+}
+
+.overwrite-toggle,
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overwrite-toggle {
+  color: #47554d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overwrite-toggle input,
+.toggle-row input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.danger {
+  color: #8c2b24;
+  background: #fee9e6;
+}
+
+.empty-fields {
+  padding: 10px;
+  border: 1px dashed #cdd8cf;
+  border-radius: 6px;
 }
 
 .toolbar {
@@ -330,6 +467,23 @@ p {
 
   .book-row {
     grid-template-columns: 18px 42px minmax(0, 1fr);
+  }
+
+  .field-config-header,
+  .field-actions {
+    flex-direction: column;
+  }
+
+  .field-config-summary {
+    flex-direction: column;
+  }
+
+  .field-entry-header {
+    display: none;
+  }
+
+  .field-entry {
+    grid-template-columns: 1fr;
   }
 
   .progress,

@@ -53,6 +53,16 @@ export type SyncField =
   | "lastReadAt"
   | "wereadId";
 
+export type HighlightSyncField =
+  | "cover"
+  | "author"
+  | "url"
+  | "bookId"
+  | "noteCount"
+  | "bookmarkCount"
+  | "reviewCount"
+  | "lastSyncedAt";
+
 export type NotionPropertyType =
   | "title"
   | "rich_text"
@@ -91,14 +101,26 @@ export interface FieldMapping {
 
 export type FieldMappings = Record<SyncField, FieldMapping>;
 
+export interface FieldMappingEntry<TSource extends string = string> {
+  id: string;
+  propertyName: string;
+  sourceType: "field" | "custom";
+  sourceField: TSource | "";
+  customValue: string;
+  overwriteOnUpdate: boolean;
+}
+
 export interface ExtensionSettings {
   notionToken: string;
   databaseId: string;
   databaseUrl: string;
   highlightDatabaseId: string;
   highlightDatabaseUrl: string;
+  fieldMappings: Array<FieldMappingEntry<SyncField>>;
+  highlightFieldMappings: Array<FieldMappingEntry<HighlightSyncField>>;
   mappings: FieldMappings;
   useNotionCover: boolean;
+  useHighlightNotionCover: boolean;
   databaseProperties: DatabaseProperty[];
   highlightDatabaseProperties: DatabaseProperty[];
   lastValidatedAt?: string;
