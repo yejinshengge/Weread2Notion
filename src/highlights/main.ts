@@ -15,7 +15,7 @@ import type {
   WeReadHighlightNote,
   WeReadNotebookBook
 } from "../shared/types";
-import { getSettings, saveSettings } from "../storage";
+import { getCachedHighlightBookList, getSettings, saveCachedHighlightBookList, saveSettings } from "../storage";
 import { getHighlightFieldMappingError, getTitleProperty } from "../services/notion";
 
 interface HighlightsState {
@@ -31,6 +31,7 @@ interface HighlightsState {
   message: string;
   error: string;
   summary: SyncSummary | null;
+  cacheFetchedAt: string | null;
 }
 
 const state: HighlightsState = {
@@ -45,7 +46,8 @@ const state: HighlightsState = {
   fieldConfigOpen: false,
   message: "",
   error: "",
-  summary: null
+  summary: null,
+  cacheFetchedAt: null
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -103,7 +105,14 @@ function render(): void {
 }
 
 async function init(): Promise<void> {
-  state.settings = await getSettings();
+  const [settings, cachedBookList] = await Promise.all([getSettings(), getCachedHighlightBookList()]);
+  state.settings = settings;
+  if (cachedBookList) {
+    state.books = cachedBookList.books;
+    state.selectedBookId = cachedBookList.selectedBookId;
+    state.cacheFetchedAt = cachedBookList.fetchedAt;
+    state.message = `已恢复上次读取的 ${cachedBookList.books.length} 本划线书籍`;
+  }
   render();
 }
 
@@ -120,6 +129,9 @@ function renderStatus(configured: boolean): string {
       ? `去重字段：${escapeHtml(idMapping.propertyName)}`
       : "去重字段：按固定页面标题匹配"
   ];
+  if (state.cacheFetchedAt && state.books.length > 0) {
+    items.push(`划线书籍缓存：${formatDate(state.cacheFetchedAt)}`);
+  }
 
   return `
     <section class="status ${configured ? "ok" : "warn"}">
@@ -151,7 +163,10 @@ function renderFieldConfig(): string {
           <h2>划线字段</h2>
           <p>${hint}</p>
         </div>
-        <span class="field-count">${settings.highlightFieldMappings.length} 个条目</span>
+        <span class="field-summary-meta">
+          <span class="field-count">${settings.highlightFieldMappings.length} 个条目</span>
+          <span class="field-toggle-cue" aria-hidden="true"></span>
+        </span>
       </summary>
       <div class="field-config-body">
         <div class="field-config-header">
@@ -499,7 +514,10 @@ async function fetchNotebooks(): Promise<void> {
 
   try {
     state.books = await sendBackgroundMessage<WeReadNotebookBook[]>({ type: "FETCH_WEREAD_NOTEBOOKS" });
+    state.selectedBookId = state.books[0]?.bookId ?? "";
+    state.cacheFetchedAt = new Date().toISOString();
     state.message = state.books.length > 0 ? `已读取 ${state.books.length} 本有划线或想法的书` : "没有读取到划线书籍";
+    await persistCurrentHighlightBookList();
     if (state.books[0]) {
       await selectBook(state.books[0].bookId);
       return;
@@ -519,6 +537,7 @@ async function selectBook(bookId: string): Promise<void> {
   }
 
   state.selectedBookId = bookId;
+  void persistCurrentHighlightBookList();
   state.notes = [];
   state.loadingNotes = true;
   state.error = "";
@@ -626,6 +645,16 @@ function escapeHtml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeHtml(value);
+}
+
+async function persistCurrentHighlightBookList(): Promise<void> {
+  const fetchedAt = state.cacheFetchedAt ?? new Date().toISOString();
+  state.cacheFetchedAt = fetchedAt;
+  await saveCachedHighlightBookList({
+    books: state.books,
+    selectedBookId: state.selectedBookId,
+    fetchedAt
+  });
 }
 
 function formatDate(value: string): string {

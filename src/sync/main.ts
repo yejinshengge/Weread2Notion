@@ -173,7 +173,10 @@ function renderFieldConfig(): string {
           <h2>书架字段</h2>
           <p>${hint}</p>
         </div>
-        <span class="field-count">${settings.fieldMappings.length} 个条目</span>
+        <span class="field-summary-meta">
+          <span class="field-count">${settings.fieldMappings.length} 个条目</span>
+          <span class="field-toggle-cue" aria-hidden="true"></span>
+        </span>
       </summary>
       <div class="field-config-body">
         <div class="field-config-header">

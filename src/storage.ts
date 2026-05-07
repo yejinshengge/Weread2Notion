@@ -1,6 +1,7 @@
 import { DEFAULT_FIELD_MAPPINGS, DEFAULT_HIGHLIGHT_FIELD_MAPPINGS, DEFAULT_MAPPINGS } from "./shared/fields";
 import type {
   CachedBookList,
+  CachedHighlightBookList,
   ExtensionSettings,
   FieldMapping,
   FieldMappingEntry,
@@ -10,6 +11,7 @@ import type {
 
 const SETTINGS_KEY = "settings";
 const BOOK_LIST_CACHE_KEY = "bookListCache";
+const HIGHLIGHT_BOOK_LIST_CACHE_KEY = "highlightBookListCache";
 
 export const defaultSettings: ExtensionSettings = {
   notionToken: "",
@@ -46,6 +48,19 @@ export async function saveCachedBookList(cache: CachedBookList): Promise<void> {
 
 export async function clearCachedBookList(): Promise<void> {
   await chrome.storage.local.remove(BOOK_LIST_CACHE_KEY);
+}
+
+export async function getCachedHighlightBookList(): Promise<CachedHighlightBookList | null> {
+  const result = await chrome.storage.local.get(HIGHLIGHT_BOOK_LIST_CACHE_KEY);
+  return normalizeHighlightBookListCache(result[HIGHLIGHT_BOOK_LIST_CACHE_KEY]);
+}
+
+export async function saveCachedHighlightBookList(cache: CachedHighlightBookList): Promise<void> {
+  await chrome.storage.local.set({ [HIGHLIGHT_BOOK_LIST_CACHE_KEY]: normalizeHighlightBookListCache(cache) });
+}
+
+export async function clearCachedHighlightBookList(): Promise<void> {
+  await chrome.storage.local.remove(HIGHLIGHT_BOOK_LIST_CACHE_KEY);
 }
 
 function normalizeSettings(value: Partial<ExtensionSettings> | undefined): ExtensionSettings {
@@ -165,6 +180,25 @@ function normalizeBookListCache(value: Partial<CachedBookList> | undefined): Cac
   return {
     books: value.books,
     selectedIds,
+    fetchedAt: typeof value.fetchedAt === "string" ? value.fetchedAt : new Date().toISOString()
+  };
+}
+
+function normalizeHighlightBookListCache(
+  value: Partial<CachedHighlightBookList> | undefined
+): CachedHighlightBookList | null {
+  if (!value || !Array.isArray(value.books)) {
+    return null;
+  }
+
+  const selectedBookId =
+    typeof value.selectedBookId === "string" && value.books.some((book) => book.bookId === value.selectedBookId)
+      ? value.selectedBookId
+      : value.books[0]?.bookId ?? "";
+
+  return {
+    books: value.books,
+    selectedBookId,
     fetchedAt: typeof value.fetchedAt === "string" ? value.fetchedAt : new Date().toISOString()
   };
 }

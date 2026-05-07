@@ -147,6 +147,12 @@ export interface CachedBookList {
   fetchedAt: string;
 }
 
+export interface CachedHighlightBookList {
+  books: WeReadNotebookBook[];
+  selectedBookId: string;
+  fetchedAt: string;
+}
+
 export type BackgroundRequest =
   | { type: "FETCH_WEREAD_BOOKS" }
   | { type: "FETCH_WEREAD_NOTEBOOKS" }

@@ -158,17 +158,51 @@ p {
   justify-content: space-between;
   gap: 12px;
   cursor: pointer;
-  list-style-position: inside;
+  list-style: none;
+  border-radius: 6px;
+  outline: none;
 }
 
-.field-config-summary::marker {
-  color: #526057;
+.field-config-summary::-webkit-details-marker {
+  display: none;
+}
+
+.field-config-summary:hover .field-toggle-cue,
+.field-config-summary:focus-visible .field-toggle-cue {
+  color: #1f6b46;
+  background: #edf7ef;
+}
+
+.field-summary-meta {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .field-count {
-  flex: 0 0 auto;
   color: #68736d;
   font-size: 12px;
+}
+
+.field-toggle-cue {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #526057;
+  background: #eef2ed;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.field-toggle-cue::after {
+  content: "展开 ▾";
+}
+
+.field-config[open] .field-toggle-cue::after {
+  content: "收起 ▴";
 }
 
 .field-config-body {
@@ -476,6 +510,11 @@ p {
 
   .field-config-summary {
     flex-direction: column;
+  }
+
+  .field-summary-meta {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .field-entry-header {
