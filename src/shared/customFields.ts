@@ -36,19 +36,7 @@ export function renderCustomValueControl<TSource extends string>(
         </select>
       `;
     case "multi_select": {
-      const selected = new Set(splitMultiSelectValue(value));
-      return `
-        <select class="custom-multi-select" data-entry-custom-multi="${escapeAttribute(entry.id)}" multiple size="3" ${disabled}>
-          ${(property.options ?? [])
-            .map(
-              (option) =>
-                `<option value="${escapeAttribute(option.name)}" ${
-                  selected.has(option.name) ? "selected" : ""
-                }>${escapeHtml(option.name)}</option>`
-            )
-            .join("")}
-        </select>
-      `;
+      return renderMultiSelectControl(entry, property, disabled);
     }
     case "checkbox":
       return `
@@ -92,12 +80,38 @@ export function bindCustomValueControls<TSource extends string>(options: BindCus
     });
   });
 
-  document.querySelectorAll<HTMLSelectElement>("select[data-entry-custom-multi]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const value = Array.from(select.selectedOptions)
-        .map((option) => option.value)
-        .join(", ");
-      options.updateEntry(select.dataset.entryCustomMulti, { customValue: value });
+  document.querySelectorAll<HTMLElement>("[data-entry-custom-multi]").forEach((control) => {
+    const button = control.querySelector<HTMLButtonElement>("[data-custom-multi-toggle]");
+    const menu = control.querySelector<HTMLElement>("[data-custom-multi-menu]");
+    const label = control.querySelector<HTMLElement>("[data-custom-multi-label]");
+    const checkboxes = Array.from(control.querySelectorAll<HTMLInputElement>("input[data-custom-multi-option]"));
+
+    button?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (button.disabled || !menu) {
+        return;
+      }
+      const shouldOpen = menu.hidden;
+      document.querySelectorAll<HTMLElement>("[data-custom-multi-menu]").forEach((otherMenu) => {
+        if (otherMenu !== menu) {
+          otherMenu.hidden = true;
+        }
+      });
+      menu.hidden = !shouldOpen;
+    });
+
+    menu?.addEventListener("click", (event) => event.stopPropagation());
+
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener("click", (event) => event.stopPropagation());
+      checkbox.addEventListener("change", () => {
+        const selected = checkboxes.filter((item) => item.checked).map((item) => item.value);
+        const value = selected.join(", ");
+        if (label) {
+          label.textContent = formatMultiSelectLabel(selected);
+        }
+        options.updateEntry(control.dataset.entryCustomMulti, { customValue: value }, false);
+      });
     });
   });
 
@@ -161,9 +175,14 @@ async function openRelationPicker(options: {
 
   const overlay = document.createElement("div");
   overlay.className = "relation-modal-backdrop";
+  const previousBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
   document.body.append(overlay);
 
-  const close = () => overlay.remove();
+  const close = () => {
+    document.body.style.overflow = previousBodyOverflow;
+    overlay.remove();
+  };
   const commit = () => {
     options.onConfirm(JSON.stringify(Array.from(selected.values())));
     close();
@@ -282,6 +301,48 @@ async function openRelationPicker(options: {
   await search();
 }
 
+function renderMultiSelectControl<TSource extends string>(
+  entry: FieldMappingEntry<TSource>,
+  property: DatabaseProperty,
+  disabled: string
+): string {
+  const selected = new Set(splitMultiSelectValue(entry.customValue));
+  const selectedLabels = splitMultiSelectValue(entry.customValue);
+  const isDisabled = disabled ? "disabled" : "";
+  const disabledClass = disabled ? " is-disabled" : "";
+  const options = property.options ?? [];
+
+  return `
+    <div class="custom-multi-select${disabledClass}" data-entry-custom-multi="${escapeAttribute(entry.id)}">
+      <button class="custom-multi-toggle" type="button" data-custom-multi-toggle ${isDisabled}>
+        <span data-custom-multi-label>${escapeHtml(formatMultiSelectLabel(selectedLabels))}</span>
+      </button>
+      <div class="custom-multi-menu" data-custom-multi-menu hidden>
+        ${
+          options.length > 0
+            ? options
+                .map(
+                  (option) => `
+                    <label class="custom-multi-option">
+                      <input
+                        type="checkbox"
+                        value="${escapeAttribute(option.name)}"
+                        data-custom-multi-option
+                        ${selected.has(option.name) ? "checked" : ""}
+                        ${isDisabled}
+                      />
+                      <span>${escapeHtml(option.name)}</span>
+                    </label>
+                  `
+                )
+                .join("")
+            : `<p class="custom-multi-empty">没有可用选项</p>`
+        }
+      </div>
+    </div>
+  `;
+}
+
 function parseRelationSelection(value: string): RelationSelection[] {
   if (!value.trim()) {
     return [];
@@ -318,6 +379,10 @@ function splitMultiSelectValue(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function formatMultiSelectLabel(selected: string[]): string {
+  return selected.length > 0 ? selected.join(", ") : "选择选项";
 }
 
 function getCustomPlaceholder(property: DatabaseProperty | undefined): string {

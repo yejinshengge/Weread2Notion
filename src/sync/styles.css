@@ -53,8 +53,102 @@ input:disabled {
 }
 
 .custom-multi-select {
-  min-height: 78px;
-  padding: 6px 10px;
+  position: relative;
+  min-width: 0;
+}
+
+.custom-multi-toggle {
+  position: relative;
+  width: 100%;
+  min-height: 36px;
+  overflow: hidden;
+  padding: 0 28px 0 10px;
+  color: #16201b;
+  border: 1px solid #cdd8cf;
+  background: #ffffff;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-multi-toggle::after {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid #526057;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.custom-multi-toggle span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-multi-select.is-disabled .custom-multi-toggle {
+  color: #8a948e;
+  border-color: #dbe2dc;
+  background: #eef2ed;
+}
+
+.custom-multi-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  max-height: 190px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid #cdd8cf;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 14px 36px rgba(22, 32, 27, 0.18);
+}
+
+.custom-multi-menu[hidden] {
+  display: none;
+}
+
+.custom-multi-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.custom-multi-option:hover {
+  background: #edf7ef;
+}
+
+.custom-multi-option input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
+.custom-multi-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-multi-empty {
+  padding: 7px 8px;
+  color: #68736d;
+  font-size: 12px;
 }
 
 .relation-custom-control {
@@ -87,11 +181,14 @@ input:disabled {
   display: grid;
   place-items: center;
   padding: 18px;
+  overflow: hidden;
   background: rgba(22, 32, 27, 0.36);
+  overscroll-behavior: contain;
 }
 
 .relation-modal {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   width: min(560px, 100%);
   max-height: min(680px, calc(100vh - 36px));
   gap: 12px;
@@ -100,6 +197,7 @@ input:disabled {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 20px 60px rgba(22, 32, 27, 0.2);
+  overscroll-behavior: contain;
 }
 
 .relation-modal header,
@@ -112,18 +210,27 @@ input:disabled {
 }
 
 .relation-search-row input {
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.relation-search-row button {
+  flex: 0 0 auto;
+  min-width: 50px;
+  white-space: nowrap;
 }
 
 .relation-results {
   display: grid;
+  flex: 1 1 auto;
   gap: 8px;
-  min-height: 180px;
+  min-height: 0;
   overflow: auto;
   padding: 8px;
   border: 1px solid #edf1ec;
   border-radius: 6px;
   background: #fbfcfa;
+  overscroll-behavior: contain;
 }
 
 .relation-result-row {
