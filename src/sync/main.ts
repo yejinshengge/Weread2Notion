@@ -45,7 +45,7 @@ async function init(): Promise<void> {
   const [settings, cachedBookList] = await Promise.all([getSettings(), getCachedBookList()]);
   state.settings = settings;
   if (cachedBookList) {
-    state.books = cachedBookList.books;
+    state.books = sortBooksByLastReadAt(cachedBookList.books);
     state.selectedIds = new Set(cachedBookList.selectedIds);
     state.cacheFetchedAt = cachedBookList.fetchedAt;
     state.message = `已恢复上次读取的 ${cachedBookList.books.length} 本书`;
@@ -515,10 +515,10 @@ async function fetchBooks(): Promise<void> {
 
   try {
     const books = await sendBackgroundMessage<WeReadBook[]>({ type: "FETCH_WEREAD_BOOKS" });
-    state.books = books;
-    state.selectedIds = new Set(books.map((book) => book.bookId));
+    state.books = sortBooksByLastReadAt(books);
+    state.selectedIds = new Set(state.books.map((book) => book.bookId));
     state.cacheFetchedAt = new Date().toISOString();
-    state.message = books.length > 0 ? `已读取 ${books.length} 本书` : "没有读取到书籍";
+    state.message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
     await persistCurrentBookList();
   } catch (error) {
     state.error = getErrorMessage(error);
@@ -573,6 +573,15 @@ function getFieldEntry(id: string | undefined): FieldMappingEntry<SyncField> | n
 
 function createEntryId(): string {
   return `field-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function sortBooksByLastReadAt(books: WeReadBook[]): WeReadBook[] {
+  return [...books].sort((first, second) => getBookLastReadTime(second) - getBookLastReadTime(first));
+}
+
+function getBookLastReadTime(book: WeReadBook): number {
+  const time = book.lastReadAt ? new Date(book.lastReadAt).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
 }
 
 function escapeHtml(value: string): string {
