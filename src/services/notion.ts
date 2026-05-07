@@ -475,6 +475,7 @@ function buildHighlightPageChildren(book: WeReadNotebookBook, notes: WeReadHighl
       children.push(headingBlock(chapterTitle));
     }
     children.push(...buildNoteBlocks(note));
+    children.push(dividerBlock());
   }
 
   return children;

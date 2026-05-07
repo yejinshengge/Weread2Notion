@@ -68,6 +68,7 @@ function render(): void {
     return;
   }
 
+  const bookListScrollTop = app.querySelector<HTMLElement>(".book-list")?.scrollTop ?? 0;
   const configured = isConfigured(state.settings);
   const selectedBook = getSelectedBook();
   const canSync = configured && selectedBook && state.notes.length > 0 && !state.syncing && !state.loadingNotes;
@@ -102,6 +103,10 @@ function render(): void {
   `;
 
   bindEvents();
+  const bookList = app.querySelector<HTMLElement>(".book-list");
+  if (bookList) {
+    bookList.scrollTop = bookListScrollTop;
+  }
 }
 
 async function init(): Promise<void> {
@@ -109,11 +114,16 @@ async function init(): Promise<void> {
   state.settings = settings;
   if (cachedBookList) {
     state.books = cachedBookList.books;
-    state.selectedBookId = cachedBookList.selectedBookId;
+    state.selectedBookId = cachedBookList.books.some((book) => book.bookId === cachedBookList.selectedBookId)
+      ? cachedBookList.selectedBookId
+      : cachedBookList.books[0]?.bookId ?? "";
     state.cacheFetchedAt = cachedBookList.fetchedAt;
     state.message = `已恢复上次读取的 ${cachedBookList.books.length} 本划线书籍`;
   }
   render();
+  if (state.selectedBookId) {
+    await selectBook(state.selectedBookId);
+  }
 }
 
 async function refreshSettings(): Promise<void> {
@@ -547,6 +557,8 @@ async function selectBook(bookId: string): Promise<void> {
 
   try {
     state.notes = await sendBackgroundMessage<WeReadHighlightNote[]>({ type: "FETCH_WEREAD_HIGHLIGHTS", book });
+    updateBookCounts(bookId, state.notes);
+    void persistCurrentHighlightBookList();
   } catch (error) {
     state.error = getErrorMessage(error);
   } finally {
@@ -584,6 +596,21 @@ async function syncCurrentBook(): Promise<void> {
 
 function getSelectedBook(): WeReadNotebookBook | null {
   return state.books.find((book) => book.bookId === state.selectedBookId) ?? null;
+}
+
+function updateBookCounts(bookId: string, notes: WeReadHighlightNote[]): void {
+  const bookmarkCount = notes.filter((note) => note.original).length;
+  const reviewCount = notes.filter((note) => note.thought).length;
+  state.books = state.books.map((book) =>
+    book.bookId === bookId
+      ? {
+          ...book,
+          noteCount: bookmarkCount,
+          bookmarkCount,
+          reviewCount
+        }
+      : book
+  );
 }
 
 function isConfigured(settings: ExtensionSettings | null): boolean {

@@ -94,7 +94,7 @@ interface ChapterInfosResponse {
 const WEREAD_SHELF_URL = "https://weread.qq.com/web/shelf/sync";
 const WEREAD_PROGRESS_URL = "https://weread.qq.com/web/book/getProgress";
 const WEREAD_NOTEBOOK_URL = "https://weread.qq.com/api/user/notebook";
-const WEREAD_BOOKMARK_LIST_URL = "https://weread.qq.com/api/book/bookmarklist";
+const WEREAD_BOOKMARK_LIST_URL = "https://weread.qq.com/web/book/bookmarklist";
 const WEREAD_REVIEW_LIST_URL = "https://weread.qq.com/api/review/list";
 const WEREAD_CHAPTER_INFOS_URL = "https://weread.qq.com/web/book/chapterInfos";
 const READER_URL_PREFIX = "https://weread.qq.com/web/reader/";
@@ -244,6 +244,11 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
     return null;
   }
 
+  const rawBookmarkCount = firstNumber(item.bookmarkCount);
+  const fallbackBookmarkCount = firstNumber(item.noteCount);
+  const bookmarkCount = rawBookmarkCount > 0 ? rawBookmarkCount : fallbackBookmarkCount;
+  const reviewCount = firstNumber(item.reviewCount);
+
   return {
     bookId,
     title,
@@ -251,8 +256,8 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
     author: emptyToUndefined(book?.author),
     url: `${READER_URL_PREFIX}${bookId}`,
     noteCount: firstNumber(item.noteCount),
-    bookmarkCount: firstNumber(item.bookmarkCount),
-    reviewCount: firstNumber(item.reviewCount),
+    bookmarkCount,
+    reviewCount,
     sort: firstNumberOrUndefined(item.sort)
   };
 }
