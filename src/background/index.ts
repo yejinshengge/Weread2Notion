@@ -3,6 +3,10 @@ import type { BackgroundRequest, BackgroundResponse, SyncProgress, SyncSummary, 
 import { validateDatabase, syncBooksToNotion } from "../services/notion";
 import { enrichBooksWithProgress, fetchWeReadBooks } from "../services/weread";
 
+chrome.action.onClicked.addListener(() => {
+  void chrome.tabs.create({ url: chrome.runtime.getURL("sync.html") });
+});
+
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, _sender, sendResponse) => {
   handleRequest(request)
     .then((data) => sendResponse({ ok: true, data } satisfies BackgroundResponse<unknown>))
@@ -44,7 +48,7 @@ async function publishSyncProgress(progress: SyncProgress): Promise<void> {
   try {
     await chrome.runtime.sendMessage({ type: "SYNC_PROGRESS", progress });
   } catch {
-    // The popup may be closed while the background task continues.
+    // The sync page may be closed while the background task continues.
   }
 }
 

@@ -3,7 +3,7 @@ import { openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
 import type { ExtensionSettings, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
 import { getCachedBookList, getSettings, saveCachedBookList } from "../storage";
 
-interface PopupState {
+interface SyncState {
   settings: ExtensionSettings | null;
   books: WeReadBook[];
   selectedIds: Set<string>;
@@ -16,7 +16,7 @@ interface PopupState {
   cacheFetchedAt: string | null;
 }
 
-const state: PopupState = {
+const state: SyncState = {
   settings: null,
   books: [],
   selectedIds: new Set(),
@@ -30,6 +30,7 @@ const state: PopupState = {
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
+document.body.classList.toggle("embedded", window.parent !== window);
 
 void init();
 
@@ -56,6 +57,14 @@ chrome.runtime.onMessage.addListener((message: { type?: string; progress?: SyncP
   render();
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.settings) {
+    return;
+  }
+
+  void refreshSettings();
+});
+
 function render(): void {
   if (!app) {
     return;
@@ -68,13 +77,13 @@ function render(): void {
   const fetchButtonDisabled = state.loading || state.syncing;
 
   app.innerHTML = `
-    <main class="popup-shell">
+    <main class="sync-shell">
       <header class="topbar">
         <div>
           <h1>WeRead to Notion</h1>
-          <p>${configured ? "已配置 Notion，可同步选中的书籍" : "请先完成 Notion 与字段映射"}</p>
+          <p>${configured ? "功能页：读取书架并同步选中的书籍" : "功能页：请先到配置页完成 Notion 与字段映射"}</p>
         </div>
-        <button class="icon-button" id="open-options" title="打开设置">设置</button>
+        <button class="icon-button" id="open-options" title="切换到配置页">配置页</button>
       </header>
 
       ${renderStatus(configured)}
@@ -107,6 +116,11 @@ function render(): void {
   if (bookList) {
     bookList.scrollTop = bookListScrollTop;
   }
+}
+
+async function refreshSettings(): Promise<void> {
+  state.settings = await getSettings();
+  render();
 }
 
 function renderStatus(configured: boolean): string {

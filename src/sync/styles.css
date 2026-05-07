@@ -4,8 +4,6 @@
 
 body {
   margin: 0;
-  min-width: 420px;
-  max-width: 420px;
   color: #16201b;
   background: #f7f8f5;
   font-family:
@@ -36,10 +34,22 @@ button:disabled {
   opacity: 0.55;
 }
 
-.popup-shell {
+.sync-shell {
   display: flex;
-  min-height: 540px;
+  width: min(1120px, calc(100vw - 48px));
+  min-height: 100vh;
   flex-direction: column;
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+body.embedded .sync-shell {
+  min-height: 100vh;
+  padding-top: 16px;
+}
+
+body.embedded .topbar {
+  display: none;
 }
 
 .topbar {
@@ -47,14 +57,14 @@ button:disabled {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 18px 12px;
+  padding: 0 0 20px;
   border-bottom: 1px solid #dde4dc;
-  background: #ffffff;
+  background: transparent;
 }
 
 h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 28px;
   line-height: 1.2;
 }
 
@@ -65,7 +75,7 @@ p {
 .topbar p {
   margin-top: 5px;
   color: #68736d;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .icon-button,
@@ -93,9 +103,10 @@ p {
 .status {
   display: grid;
   gap: 6px;
-  padding: 12px 18px;
-  font-size: 12px;
-  border-bottom: 1px solid #dde4dc;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  border-radius: 6px;
 }
 
 .status span,
@@ -115,13 +126,14 @@ p {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 16px 0;
 }
 
 .empty {
   display: grid;
-  min-height: 280px;
+  min-height: 360px;
   place-items: center;
   padding: 24px;
   color: #68736d;
@@ -130,26 +142,30 @@ p {
 
 .book-list {
   display: grid;
-  max-height: 325px;
+  max-height: calc(100vh - 330px);
+  min-height: 360px;
   overflow: auto;
+  border-right: 1px solid #e3e8e1;
+  border-left: 1px solid #e3e8e1;
+  border-radius: 8px;
   border-top: 1px solid #e3e8e1;
   border-bottom: 1px solid #e3e8e1;
 }
 
 .book-row {
   display: grid;
-  grid-template-columns: 18px 38px minmax(0, 1fr) 44px 58px;
+  grid-template-columns: 18px 48px minmax(0, 1fr) 72px 76px;
   align-items: center;
-  gap: 10px;
-  min-height: 64px;
-  padding: 9px 18px;
+  gap: 14px;
+  min-height: 76px;
+  padding: 12px 18px;
   background: #ffffff;
   border-bottom: 1px solid #edf0eb;
 }
 
 .book-row img {
-  width: 34px;
-  height: 46px;
+  width: 42px;
+  height: 56px;
   object-fit: cover;
   border-radius: 4px;
   background: #e6ebe5;
@@ -169,7 +185,7 @@ p {
 }
 
 .book-main strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .book-main small {
@@ -199,9 +215,11 @@ p {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  padding: 12px 18px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e3e8e1;
+  border-radius: 8px;
   background: #ffffff;
-  border-bottom: 1px solid #e3e8e1;
 }
 
 .summary div {
@@ -236,9 +254,11 @@ p {
 .sync-progress {
   display: grid;
   gap: 8px;
-  padding: 12px 18px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e3e8e1;
+  border-radius: 8px;
   background: #ffffff;
-  border-bottom: 1px solid #e3e8e1;
 }
 
 .progress-heading {
@@ -279,8 +299,10 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: auto;
-  padding: 14px 18px;
+  position: sticky;
+  bottom: 0;
+  margin-top: 16px;
+  padding: 14px 0;
   background: #ffffff;
   border-top: 1px solid #dde4dc;
 }
@@ -288,4 +310,35 @@ p {
 .footer span {
   color: #68736d;
   font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .sync-shell {
+    width: calc(100vw - 28px);
+    padding-top: 18px;
+  }
+
+  .topbar,
+  .footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .book-list {
+    max-height: none;
+  }
+
+  .book-row {
+    grid-template-columns: 18px 42px minmax(0, 1fr);
+  }
+
+  .progress,
+  .badge {
+    grid-column: 3;
+    justify-self: start;
+  }
+
+  .summary {
+    grid-template-columns: 1fr;
+  }
 }

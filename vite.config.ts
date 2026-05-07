@@ -7,7 +7,8 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       input: {
-        popup: "popup.html",
+        sync: "sync.html",
+        feature: "function.html",
         options: "options.html",
         background: "src/background/index.ts"
       },

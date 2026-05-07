@@ -12,5 +12,10 @@ export async function sendBackgroundMessage<T>(request: BackgroundRequest): Prom
 }
 
 export function openOptionsPage(): void {
-  chrome.runtime.openOptionsPage();
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "SWITCH_TAB", tab: "settings" }, window.location.origin);
+    return;
+  }
+
+  window.location.href = chrome.runtime.getURL("sync.html#settings");
 }

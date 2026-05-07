@@ -36,6 +36,14 @@ select:disabled {
   padding: 28px 0 40px;
 }
 
+body.embedded .settings-shell {
+  padding-top: 16px;
+}
+
+body.embedded .hero {
+  display: none;
+}
+
 .hero {
   display: flex;
   align-items: flex-end;
@@ -63,6 +71,12 @@ select:disabled {
 .hero span {
   color: #6a746e;
   font-size: 13px;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .notice {
@@ -154,6 +168,7 @@ label span,
   min-height: 32px;
   padding: 0 12px;
   color: #1f6b46;
+  cursor: pointer;
   border: 1px solid #b8d7c3;
   border-radius: 6px;
   background: #eff8f1;
@@ -280,6 +295,11 @@ select:focus {
   }
 
   .hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero-actions {
     align-items: flex-start;
     flex-direction: column;
   }

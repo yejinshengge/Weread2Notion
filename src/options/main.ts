@@ -29,6 +29,7 @@ const state: OptionsState = {
 const app = document.querySelector<HTMLDivElement>("#app");
 const NOTION_INTEGRATIONS_URL = "https://www.notion.so/my-integrations";
 let toastTimer: number | undefined;
+document.body.classList.toggle("embedded", window.parent !== window);
 
 void init();
 
@@ -51,9 +52,12 @@ function render(): void {
       <header class="hero">
         <div>
           <p>WeRead to Notion</p>
-          <h1>同步设置</h1>
+          <h1>配置页</h1>
         </div>
-        <span>${settings.lastValidatedAt ? `上次验证：${formatDate(settings.lastValidatedAt)}` : "尚未验证数据库"}</span>
+        <div class="hero-actions">
+          <span>${settings.lastValidatedAt ? `上次验证：${formatDate(settings.lastValidatedAt)}` : "尚未验证数据库"}</span>
+          <button class="secondary-link" id="open-sync-page" type="button">打开功能页</button>
+        </div>
       </header>
 
       ${renderMessage()}
@@ -176,6 +180,7 @@ function renderMappingRow(field: SyncField, settings: ExtensionSettings): string
 }
 
 function bindEvents(): void {
+  document.querySelector("#open-sync-page")?.addEventListener("click", openSyncPage);
   document.querySelector("#validate-database")?.addEventListener("click", validateDatabaseFromForm);
   document.querySelector("#save-settings")?.addEventListener("click", saveSettingsFromForm);
 
@@ -218,6 +223,15 @@ function bindEvents(): void {
     }
     state.settings.useNotionCover = (event.currentTarget as HTMLInputElement).checked;
   });
+}
+
+function openSyncPage(): void {
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "SWITCH_TAB", tab: "sync" }, window.location.origin);
+    return;
+  }
+
+  window.location.href = chrome.runtime.getURL("sync.html");
 }
 
 async function validateDatabaseFromForm(): Promise<void> {

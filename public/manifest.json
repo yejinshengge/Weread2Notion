@@ -4,8 +4,7 @@
   "description": "同步微信读书阅读记录到指定 Notion 数据库。",
   "version": "0.1.0",
   "action": {
-    "default_title": "WeRead to Notion",
-    "default_popup": "popup.html"
+    "default_title": "打开功能页"
   },
   "background": {
     "service_worker": "assets/background.js",
