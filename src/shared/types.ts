@@ -13,6 +13,36 @@ export interface WeReadBook {
   lastReadAt?: string;
 }
 
+export interface WeReadNotebookBook {
+  bookId: string;
+  title: string;
+  author?: string;
+  cover?: string;
+  url: string;
+  noteCount: number;
+  bookmarkCount: number;
+  reviewCount: number;
+  sort?: number;
+}
+
+export type HighlightNoteType = "bookmark" | "review";
+
+export interface WeReadHighlightNote {
+  id: string;
+  bookId: string;
+  type: HighlightNoteType;
+  chapterUid?: string;
+  chapterIdx?: number;
+  chapterTitle?: string;
+  original: string;
+  thought?: string;
+  userName?: string;
+  userVid?: string;
+  range?: string;
+  createTime?: number;
+  createdAt?: string;
+}
+
 export type SyncField =
   | "cover"
   | "progress"
@@ -65,10 +95,14 @@ export interface ExtensionSettings {
   notionToken: string;
   databaseId: string;
   databaseUrl: string;
+  highlightDatabaseId: string;
+  highlightDatabaseUrl: string;
   mappings: FieldMappings;
   useNotionCover: boolean;
   databaseProperties: DatabaseProperty[];
+  highlightDatabaseProperties: DatabaseProperty[];
   lastValidatedAt?: string;
+  lastHighlightValidatedAt?: string;
 }
 
 export interface SyncSummary {
@@ -93,8 +127,12 @@ export interface CachedBookList {
 
 export type BackgroundRequest =
   | { type: "FETCH_WEREAD_BOOKS" }
+  | { type: "FETCH_WEREAD_NOTEBOOKS" }
+  | { type: "FETCH_WEREAD_HIGHLIGHTS"; book: WeReadNotebookBook }
   | { type: "VALIDATE_NOTION"; token: string; databaseIdOrUrl: string }
-  | { type: "SYNC_BOOKS"; books: WeReadBook[] };
+  | { type: "VALIDATE_HIGHLIGHT_NOTION"; token: string; databaseIdOrUrl: string }
+  | { type: "SYNC_BOOKS"; books: WeReadBook[] }
+  | { type: "SYNC_BOOK_HIGHLIGHTS"; book: WeReadNotebookBook; notes: WeReadHighlightNote[] };
 
 export type BackgroundResponse<T> =
   | { ok: true; data: T }

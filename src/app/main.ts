@@ -1,10 +1,11 @@
 import "./styles.css";
 
-type AppTab = "sync" | "settings";
+type AppTab = "sync" | "highlights" | "settings";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const tabs: Array<{ id: AppTab; label: string; src: string }> = [
   { id: "sync", label: "功能页", src: chrome.runtime.getURL("function.html") },
+  { id: "highlights", label: "划线同步", src: chrome.runtime.getURL("highlights.html") },
   { id: "settings", label: "配置页", src: chrome.runtime.getURL("options.html") }
 ];
 
@@ -96,7 +97,13 @@ function updateActiveTab(): void {
 }
 
 function getInitialTab(): AppTab {
-  return window.location.hash === "#settings" ? "settings" : "sync";
+  if (window.location.hash === "#settings") {
+    return "settings";
+  }
+  if (window.location.hash === "#highlights") {
+    return "highlights";
+  }
+  return "sync";
 }
 
 function getTabLabel(tab: AppTab): string {

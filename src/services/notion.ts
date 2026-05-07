@@ -7,7 +7,9 @@ import type {
   SyncProgress,
   SyncField,
   SyncSummary,
-  WeReadBook
+  WeReadBook,
+  WeReadHighlightNote,
+  WeReadNotebookBook
 } from "../shared/types";
 
 const NOTION_VERSION = "2022-06-28";
@@ -20,6 +22,8 @@ interface NotionDatabaseResponse {
 
 interface NotionQueryResponse {
   results: Array<{ id: string }>;
+  has_more?: boolean;
+  next_cursor?: string | null;
 }
 
 interface NotionErrorResponse {
@@ -35,6 +39,7 @@ type NotionPagePayload = {
     external: { url: string };
   };
 };
+type NotionBlock = Record<string, unknown>;
 
 export interface DatabaseValidationResult {
   databaseId: string;
@@ -117,6 +122,48 @@ export async function syncBooksToNotion(
   return summary;
 }
 
+export async function syncBookHighlightsToNotion(
+  settings: ExtensionSettings,
+  book: WeReadNotebookBook,
+  notes: WeReadHighlightNote[]
+): Promise<SyncSummary> {
+  ensureHighlightSyncSettings(settings);
+
+  const summary: SyncSummary = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: []
+  };
+
+  try {
+    const existingPageId = await findExistingHighlightPage(settings, book);
+    const payload = buildHighlightPagePayload(settings, book, notes);
+
+    if (existingPageId) {
+      await notionRequest(settings.notionToken, `/pages/${existingPageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ properties: payload.properties, cover: payload.cover })
+      });
+      await replacePageChildren(settings.notionToken, existingPageId, payload.children);
+      summary.updated += 1;
+    } else {
+      await notionRequest(settings.notionToken, "/pages", {
+        method: "POST",
+        body: JSON.stringify({
+          parent: { database_id: settings.highlightDatabaseId },
+          ...payload
+        })
+      });
+      summary.created += 1;
+    }
+  } catch (error) {
+    summary.failed.push({ title: book.title, reason: getErrorMessage(error) });
+  }
+
+  return summary;
+}
+
 export function extractDatabaseId(databaseIdOrUrl: string): string {
   const trimmed = databaseIdOrUrl.trim();
   const compactId = trimmed.replace(/-/g, "");
@@ -177,6 +224,16 @@ function ensureSyncSettings(settings: ExtensionSettings): void {
   }
 }
 
+function ensureHighlightSyncSettings(settings: ExtensionSettings): void {
+  if (!settings.notionToken || !settings.highlightDatabaseId) {
+    throw new Error("请先配置划线同步的 Notion 数据库");
+  }
+  const titleProperty = getTitleProperty(settings.highlightDatabaseProperties);
+  if (!titleProperty) {
+    throw new Error("划线同步数据库必须包含 title 类型字段");
+  }
+}
+
 async function findExistingPage(settings: ExtensionSettings, book: WeReadBook): Promise<string | null> {
   const property = getMappedProperty(settings, "wereadId");
   if (!property) {
@@ -195,6 +252,34 @@ async function findExistingPage(settings: ExtensionSettings, book: WeReadBook): 
       page_size: 1
     })
   });
+
+  return response.results[0]?.id ?? null;
+}
+
+async function findExistingHighlightPage(settings: ExtensionSettings, book: WeReadNotebookBook): Promise<string | null> {
+  const idProperty = getHighlightBookIdProperty(settings);
+  const titleProperty = getTitleProperty(settings.highlightDatabaseProperties);
+  if (!titleProperty) {
+    return null;
+  }
+
+  const filter = idProperty
+    ? idProperty.type === "select"
+      ? { property: idProperty.name, select: { equals: book.bookId } }
+      : { property: idProperty.name, rich_text: { equals: book.bookId } }
+    : { property: titleProperty.name, title: { equals: getHighlightPageTitle(book) } };
+
+  const response = await notionRequest<NotionQueryResponse>(
+    settings.notionToken,
+    `/databases/${settings.highlightDatabaseId}/query`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        filter,
+        page_size: 1
+      })
+    }
+  );
 
   return response.results[0]?.id ?? null;
 }
@@ -246,6 +331,247 @@ function buildPagePayload(
   }
 
   return payload;
+}
+
+function buildHighlightPagePayload(
+  settings: ExtensionSettings,
+  book: WeReadNotebookBook,
+  notes: WeReadHighlightNote[]
+): NotionPagePayload & { children: NotionBlock[] } {
+  const titleProperty = getTitleProperty(settings.highlightDatabaseProperties);
+  if (!titleProperty) {
+    throw new Error("划线同步数据库必须包含 title 类型字段");
+  }
+
+  const properties: Record<string, NotionPropertyValue> = {
+    [titleProperty.name]: {
+      title: [{ text: { content: getHighlightPageTitle(book) } }]
+    }
+  };
+
+  addOptionalHighlightProperty(settings, properties, "WeRead ID", book.bookId);
+  addOptionalHighlightProperty(settings, properties, "Book ID", book.bookId);
+  addOptionalHighlightProperty(settings, properties, "作者", book.author);
+  addOptionalHighlightProperty(settings, properties, "Author", book.author);
+  addOptionalHighlightProperty(settings, properties, "微信读书链接", book.url);
+  addOptionalHighlightProperty(settings, properties, "URL", book.url);
+  addOptionalHighlightProperty(settings, properties, "划线数量", notes.filter((note) => note.original).length);
+  addOptionalHighlightProperty(settings, properties, "想法数量", notes.filter((note) => note.thought).length);
+  addOptionalHighlightProperty(settings, properties, "最后同步", new Date().toISOString());
+
+  const payload: NotionPagePayload & { children: NotionBlock[] } = {
+    properties,
+    children: buildHighlightPageChildren(book, notes)
+  };
+
+  if (book.cover) {
+    payload.cover = {
+      type: "external",
+      external: { url: book.cover }
+    };
+  }
+
+  return payload;
+}
+
+function getHighlightPageTitle(book: WeReadNotebookBook): string {
+  return `《${book.title}》划线与想法`;
+}
+
+function addOptionalHighlightProperty(
+  settings: ExtensionSettings,
+  properties: Record<string, NotionPropertyValue>,
+  propertyName: string,
+  value: string | number | undefined
+): void {
+  if (value === undefined || value === "") {
+    return;
+  }
+
+  const property = settings.highlightDatabaseProperties.find((item) => item.name === propertyName);
+  if (!property) {
+    return;
+  }
+
+  const stringValue = String(value);
+  switch (property.type) {
+    case "rich_text":
+      properties[property.name] = { rich_text: [{ text: { content: stringValue } }] };
+      break;
+    case "select":
+      properties[property.name] = { select: { name: stringValue } };
+      break;
+    case "url":
+      properties[property.name] = { url: stringValue };
+      break;
+    case "number":
+      if (typeof value === "number" && Number.isFinite(value)) {
+        properties[property.name] = { number: value };
+      }
+      break;
+    case "date":
+      properties[property.name] = { date: { start: stringValue } };
+      break;
+  }
+}
+
+function getHighlightBookIdProperty(settings: ExtensionSettings): DatabaseProperty | null {
+  const preferredNames = ["WeRead ID", "Book ID", "BookId", "bookId", "微信读书ID"];
+  return (
+    settings.highlightDatabaseProperties.find(
+      (property) => preferredNames.includes(property.name) && ["rich_text", "select"].includes(property.type)
+    ) ?? null
+  );
+}
+
+function buildHighlightPageChildren(book: WeReadNotebookBook, notes: WeReadHighlightNote[]): NotionBlock[] {
+  const children: NotionBlock[] = [
+    paragraphBlock(`书名：${book.title}`),
+    paragraphBlock(`作者：${book.author || "未知"} · 划线 ${notes.filter((note) => note.original).length} · 想法 ${notes.filter((note) => note.thought).length}`),
+    paragraphBlock(`微信读书：${book.url}`),
+    dividerBlock()
+  ];
+
+  if (notes.length === 0) {
+    children.push(paragraphBlock("这本书暂时没有读取到划线或想法。"));
+    return children;
+  }
+
+  let currentChapter = "";
+  for (const note of notes) {
+    const chapterTitle = note.chapterTitle || "未分章节";
+    if (chapterTitle !== currentChapter) {
+      currentChapter = chapterTitle;
+      children.push(headingBlock(chapterTitle));
+    }
+    children.push(...buildNoteBlocks(note));
+  }
+
+  return children;
+}
+
+function buildNoteBlocks(note: WeReadHighlightNote): NotionBlock[] {
+  const blocks: NotionBlock[] = [];
+  const meta = [note.userName, note.createdAt ? formatDate(note.createdAt) : undefined].filter(Boolean).join(" · ");
+
+  if (note.original) {
+    blocks.push(...textBlocks("quote", note.original));
+  }
+  if (note.thought) {
+    blocks.push(...textBlocks("paragraph", `想法：${note.thought}`));
+  }
+  if (meta) {
+    blocks.push(paragraphBlock(meta));
+  }
+  return blocks;
+}
+
+function textBlocks(type: "paragraph" | "quote", text: string): NotionBlock[] {
+  return splitText(text).map((content) =>
+    type === "quote"
+      ? {
+          object: "block",
+          type: "quote",
+          quote: {
+            rich_text: [{ type: "text", text: { content } }],
+            color: "default"
+          }
+        }
+      : paragraphBlock(content)
+  );
+}
+
+function paragraphBlock(content: string): NotionBlock {
+  return {
+    object: "block",
+    type: "paragraph",
+    paragraph: {
+      rich_text: [{ type: "text", text: { content } }],
+      color: "default"
+    }
+  };
+}
+
+function headingBlock(content: string): NotionBlock {
+  return {
+    object: "block",
+    type: "heading_2",
+    heading_2: {
+      rich_text: [{ type: "text", text: { content: truncateText(content, 180) } }],
+      color: "default",
+      is_toggleable: false
+    }
+  };
+}
+
+function dividerBlock(): NotionBlock {
+  return {
+    object: "block",
+    type: "divider",
+    divider: {}
+  };
+}
+
+function splitText(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < trimmed.length; index += 1900) {
+    chunks.push(trimmed.slice(index, index + 1900));
+  }
+  return chunks;
+}
+
+function truncateText(text: string, maxLength: number): string {
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+async function replacePageChildren(token: string, pageId: string, children: NotionBlock[]): Promise<void> {
+  const existingChildren = await listPageChildren(token, pageId);
+  for (const child of existingChildren) {
+    await notionRequest(token, `/blocks/${child.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true })
+    });
+  }
+
+  for (let index = 0; index < children.length; index += 100) {
+    await notionRequest(token, `/blocks/${pageId}/children`, {
+      method: "PATCH",
+      body: JSON.stringify({ children: children.slice(index, index + 100) })
+    });
+  }
+}
+
+async function listPageChildren(token: string, pageId: string): Promise<Array<{ id: string }>> {
+  const children: Array<{ id: string }> = [];
+  let startCursor: string | undefined;
+
+  do {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (startCursor) {
+      query.set("start_cursor", startCursor);
+    }
+    const response = await notionRequest<NotionQueryResponse>(token, `/blocks/${pageId}/children?${query.toString()}`, {
+      method: "GET"
+    });
+    children.push(...response.results);
+    startCursor = response.next_cursor ?? undefined;
+    if (!response.has_more) {
+      break;
+    }
+  } while (startCursor);
+
+  return children;
 }
 
 function hasPagePayloadChanges(payload: NotionPagePayload): boolean {

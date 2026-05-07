@@ -1,7 +1,15 @@
 import { getSettings, saveSettings } from "../storage";
-import type { BackgroundRequest, BackgroundResponse, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
-import { validateDatabase, syncBooksToNotion } from "../services/notion";
-import { enrichBooksWithProgress, fetchWeReadBooks } from "../services/weread";
+import type {
+  BackgroundRequest,
+  BackgroundResponse,
+  SyncProgress,
+  SyncSummary,
+  WeReadBook,
+  WeReadHighlightNote,
+  WeReadNotebookBook
+} from "../shared/types";
+import { syncBookHighlightsToNotion, syncBooksToNotion, validateDatabase } from "../services/notion";
+import { enrichBooksWithProgress, fetchWeReadBooks, fetchWeReadHighlights, fetchWeReadNotebooks } from "../services/weread";
 
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("sync.html") });
@@ -15,11 +23,19 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, _sender, sendR
   return true;
 });
 
-async function handleRequest(request: BackgroundRequest): Promise<WeReadBook[] | SyncSummary | unknown> {
+async function handleRequest(
+  request: BackgroundRequest
+): Promise<WeReadBook[] | WeReadNotebookBook[] | WeReadHighlightNote[] | SyncSummary | unknown> {
   switch (request.type) {
     case "FETCH_WEREAD_BOOKS": {
       const settings = await getSettings();
       return fetchWeReadBooks({ includeStartReadAt: isStartReadAtEnabled(settings) });
+    }
+    case "FETCH_WEREAD_NOTEBOOKS": {
+      return fetchWeReadNotebooks();
+    }
+    case "FETCH_WEREAD_HIGHLIGHTS": {
+      return fetchWeReadHighlights(request.book.bookId);
     }
     case "VALIDATE_NOTION": {
       const validation = await validateDatabase(request.token, request.databaseIdOrUrl);
@@ -34,12 +50,29 @@ async function handleRequest(request: BackgroundRequest): Promise<WeReadBook[] |
       });
       return validation;
     }
+    case "VALIDATE_HIGHLIGHT_NOTION": {
+      const validation = await validateDatabase(request.token, request.databaseIdOrUrl);
+      const settings = await getSettings();
+      await saveSettings({
+        ...settings,
+        notionToken: request.token,
+        highlightDatabaseUrl: request.databaseIdOrUrl,
+        highlightDatabaseId: validation.databaseId,
+        highlightDatabaseProperties: validation.properties,
+        lastHighlightValidatedAt: new Date().toISOString()
+      });
+      return validation;
+    }
     case "SYNC_BOOKS": {
       const settings = await getSettings();
       const books = isStartReadAtEnabled(settings) ? await enrichBooksWithProgress(request.books) : request.books;
       return syncBooksToNotion(settings, books, {
         onProgress: (progress) => publishSyncProgress(progress)
       });
+    }
+    case "SYNC_BOOK_HIGHLIGHTS": {
+      const settings = await getSettings();
+      return syncBookHighlightsToNotion(settings, request.book, request.notes);
     }
   }
 }

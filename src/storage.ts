@@ -8,9 +8,12 @@ export const defaultSettings: ExtensionSettings = {
   notionToken: "",
   databaseId: "",
   databaseUrl: "",
+  highlightDatabaseId: "",
+  highlightDatabaseUrl: "",
   mappings: cloneDefaultMappings(),
   useNotionCover: true,
-  databaseProperties: []
+  databaseProperties: [],
+  highlightDatabaseProperties: []
 };
 
 export async function getSettings(): Promise<ExtensionSettings> {
@@ -40,7 +43,8 @@ function normalizeSettings(value: Partial<ExtensionSettings> | undefined): Exten
     ...defaultSettings,
     ...value,
     mappings: normalizeMappings(value?.mappings),
-    databaseProperties: value?.databaseProperties ?? []
+    databaseProperties: value?.databaseProperties ?? [],
+    highlightDatabaseProperties: value?.highlightDatabaseProperties ?? []
   };
 }
 
