@@ -5,6 +5,7 @@ import {
   getHighlightAllowedTypes,
   isWritablePropertyType
 } from "../shared/fields";
+import { bindCustomValueControls, renderCustomValueControl } from "../shared/customFields";
 import { openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
 import type {
   DatabaseProperty,
@@ -245,13 +246,7 @@ function renderFieldEntry(entry: FieldMappingEntry<HighlightSyncField>, properti
         ).join("")}
         <option value="__custom" ${customMode ? "selected" : ""}>自定义内容</option>
       </select>
-      <input
-        data-entry-custom="${escapeAttribute(entry.id)}"
-        type="text"
-        value="${escapeAttribute(entry.customValue)}"
-        placeholder="${escapeAttribute(getCustomPlaceholder(property))}"
-        ${customMode ? "" : "disabled"}
-      />
+      ${renderCustomValueControl(entry, property)}
       <label class="overwrite-toggle">
         <input
           type="checkbox"
@@ -401,7 +396,13 @@ function bindEvents(): void {
   });
 
   document.querySelectorAll<HTMLSelectElement>("select[data-entry-property]").forEach((select) => {
-    select.addEventListener("change", () => updateFieldEntry(select.dataset.entryProperty, { propertyName: select.value }));
+    select.addEventListener("change", () => {
+      const entry = getFieldEntry(select.dataset.entryProperty);
+      updateFieldEntry(select.dataset.entryProperty, {
+        propertyName: select.value,
+        customValue: entry?.sourceType === "custom" ? "" : entry?.customValue ?? ""
+      });
+    });
   });
 
   document.querySelectorAll<HTMLSelectElement>("select[data-entry-source]").forEach((select) => {
@@ -416,9 +417,10 @@ function bindEvents(): void {
     });
   });
 
-  document.querySelectorAll<HTMLInputElement>("input[data-entry-custom]").forEach((input) => {
-    input.addEventListener("input", () => updateFieldEntry(input.dataset.entryCustom, { customValue: input.value }, false));
-    input.addEventListener("change", render);
+  bindCustomValueControls<HighlightSyncField>({
+    getEntry: getFieldEntry,
+    updateEntry: updateFieldEntry,
+    render
   });
 
   document.querySelectorAll<HTMLInputElement>("input[data-entry-overwrite]").forEach((input) => {
@@ -630,27 +632,6 @@ function getHighlightBookIdMapping(settings = state.settings): FieldMappingEntry
 
 function getFieldEntry(id: string | undefined): FieldMappingEntry<HighlightSyncField> | null {
   return state.settings?.highlightFieldMappings.find((entry) => entry.id === id) ?? null;
-}
-
-function getCustomPlaceholder(property: DatabaseProperty | undefined): string {
-  switch (property?.type) {
-    case "status":
-    case "select":
-      return "填写 Notion 中已有选项";
-    case "number":
-      return "填写数字";
-    case "checkbox":
-      return "true/false 或 是/否";
-    case "date":
-      return "YYYY-MM-DD";
-    case "multi_select":
-      return "多个选项用逗号分隔";
-    case "url":
-    case "files":
-      return "https://...";
-    default:
-      return "填写自定义内容";
-  }
 }
 
 function createEntryId(): string {

@@ -87,10 +87,18 @@ export type NotionPropertyType =
   | "unique_id"
   | "unknown";
 
+export interface DatabasePropertyOption {
+  id: string;
+  name: string;
+  color?: string;
+}
+
 export interface DatabaseProperty {
   id: string;
   name: string;
   type: NotionPropertyType;
+  options?: DatabasePropertyOption[];
+  relationDatabaseId?: string;
 }
 
 export interface FieldMapping {
@@ -153,12 +161,18 @@ export interface CachedHighlightBookList {
   fetchedAt: string;
 }
 
+export interface NotionPageSearchResult {
+  id: string;
+  title: string;
+}
+
 export type BackgroundRequest =
   | { type: "FETCH_WEREAD_BOOKS" }
   | { type: "FETCH_WEREAD_NOTEBOOKS" }
   | { type: "FETCH_WEREAD_HIGHLIGHTS"; book: WeReadNotebookBook }
   | { type: "VALIDATE_NOTION"; token: string; databaseIdOrUrl: string }
   | { type: "VALIDATE_HIGHLIGHT_NOTION"; token: string; databaseIdOrUrl: string }
+  | { type: "SEARCH_NOTION_PAGES"; databaseId: string; query: string }
   | { type: "SYNC_BOOKS"; books: WeReadBook[] }
   | { type: "SYNC_BOOK_HIGHLIGHTS"; book: WeReadNotebookBook; notes: WeReadHighlightNote[] };
 

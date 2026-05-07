@@ -74,7 +74,8 @@ export const WRITABLE_PROPERTY_TYPES: NotionPropertyType[] = [
   "status",
   "checkbox",
   "date",
-  "multi_select"
+  "multi_select",
+  "relation"
 ];
 
 export function getAllowedTypes(field: SyncField): NotionPropertyType[] {

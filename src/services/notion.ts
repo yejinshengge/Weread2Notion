@@ -10,6 +10,7 @@ import type {
   FieldMappingEntry,
   HighlightSyncField,
   FieldMapping,
+  NotionPageSearchResult,
   NotionPropertyType,
   SyncProgress,
   SyncField,
@@ -24,13 +25,34 @@ const NOTION_API_BASE = "https://api.notion.com/v1";
 
 interface NotionDatabaseResponse {
   id: string;
-  properties: Record<string, { id: string; type: NotionPropertyType }>;
+  properties: Record<string, NotionDatabasePropertyResponse>;
 }
 
 interface NotionQueryResponse {
-  results: Array<{ id: string }>;
+  results: Array<{ id: string; properties?: Record<string, NotionPagePropertyResponse> }>;
   has_more?: boolean;
   next_cursor?: string | null;
+}
+
+interface NotionDatabasePropertyResponse {
+  id: string;
+  type: NotionPropertyType;
+  select?: { options?: NotionOptionResponse[] };
+  status?: { options?: NotionOptionResponse[] };
+  multi_select?: { options?: NotionOptionResponse[] };
+  relation?: { database_id?: string };
+}
+
+interface NotionOptionResponse {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+interface NotionPagePropertyResponse {
+  id?: string;
+  type?: NotionPropertyType;
+  title?: Array<{ plain_text?: string; text?: { content?: string } }>;
 }
 
 interface NotionErrorResponse {
@@ -73,6 +95,42 @@ export async function validateDatabase(token: string, databaseIdOrUrl: string): 
     databaseId: database.id,
     properties
   };
+}
+
+export async function searchDatabasePages(
+  token: string,
+  databaseId: string,
+  query: string
+): Promise<NotionPageSearchResult[]> {
+  const database = await notionRequest<NotionDatabaseResponse>(token, `/databases/${databaseId}`, {
+    method: "GET"
+  });
+  const titleProperty = Object.entries(database.properties).find(([, property]) => property.type === "title");
+  if (!titleProperty) {
+    return [];
+  }
+
+  const [titlePropertyName] = titleProperty;
+  const trimmedQuery = query.trim();
+  const response = await notionRequest<NotionQueryResponse>(token, `/databases/${databaseId}/query`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(trimmedQuery
+        ? {
+            filter: {
+              property: titlePropertyName,
+              title: { contains: trimmedQuery }
+            }
+          }
+        : {}),
+      page_size: 20
+    })
+  });
+
+  return response.results.map((page) => ({
+    id: page.id,
+    title: getPageTitle(page.properties?.[titlePropertyName]) || "Untitled"
+  }));
 }
 
 export async function syncBooksToNotion(
@@ -267,6 +325,9 @@ function getCustomValueError(value: string, propertyType: NotionPropertyType): s
   }
   if (propertyType === "checkbox" && parseBooleanValue(trimmed) === null) {
     return "自定义内容需要是 true/false、是/否 或 1/0";
+  }
+  if (propertyType === "relation" && parseCustomRelationValue(trimmed).length === 0) {
+    return "请选择关联页面";
   }
   return null;
 }
@@ -687,6 +748,10 @@ function buildPropertyValue(
           .filter(Boolean)
           .map((name) => ({ name }))
       };
+    case "relation": {
+      const pageIds = parseCustomRelationValue(String(value));
+      return pageIds.length > 0 ? { relation: pageIds.map((id) => ({ id })) } : null;
+    }
     case "rich_text":
       return { rich_text: [{ text: { content: String(value) } }] };
     default:
@@ -793,11 +858,66 @@ function parseBooleanValue(value: string): boolean | null {
   return null;
 }
 
+function parseCustomRelationValue(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => {
+          if (typeof item === "string") {
+            return item;
+          }
+          if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") {
+            return (item as { id: string }).id;
+          }
+          return "";
+        })
+        .filter(Boolean);
+    }
+  } catch {
+    // Legacy/custom text values fall back to comma separated page ids.
+  }
+
+  return trimmed
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getPropertyOptions(value: NotionDatabasePropertyResponse): NotionOptionResponse[] | undefined {
+  switch (value.type) {
+    case "select":
+      return value.select?.options;
+    case "status":
+      return value.status?.options;
+    case "multi_select":
+      return value.multi_select?.options;
+    default:
+      return undefined;
+  }
+}
+
+function getPageTitle(property: NotionPagePropertyResponse | undefined): string {
+  return (
+    property?.title
+      ?.map((item) => item.plain_text ?? item.text?.content ?? "")
+      .join("")
+      .trim() ?? ""
+  );
+}
+
 function mapDatabaseProperties(properties: NotionDatabaseResponse["properties"]): DatabaseProperty[] {
   return Object.entries(properties).map(([name, value]) => ({
     id: value.id,
     name,
-    type: value.type ?? "unknown"
+    type: value.type ?? "unknown",
+    options: getPropertyOptions(value),
+    relationDatabaseId: value.type === "relation" ? value.relation?.database_id : undefined
   }));
 }
 

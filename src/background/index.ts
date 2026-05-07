@@ -8,7 +8,7 @@ import type {
   WeReadHighlightNote,
   WeReadNotebookBook
 } from "../shared/types";
-import { syncBookHighlightsToNotion, syncBooksToNotion, validateDatabase } from "../services/notion";
+import { searchDatabasePages, syncBookHighlightsToNotion, syncBooksToNotion, validateDatabase } from "../services/notion";
 import { enrichBooksWithProgress, fetchWeReadBooks, fetchWeReadHighlights, fetchWeReadNotebooks } from "../services/weread";
 
 chrome.action.onClicked.addListener(() => {
@@ -62,6 +62,13 @@ async function handleRequest(
         lastHighlightValidatedAt: new Date().toISOString()
       });
       return validation;
+    }
+    case "SEARCH_NOTION_PAGES": {
+      const settings = await getSettings();
+      if (!settings.notionToken) {
+        throw new Error("请先完成 Notion 设置");
+      }
+      return searchDatabasePages(settings.notionToken, request.databaseId, request.query);
     }
     case "SYNC_BOOKS": {
       const settings = await getSettings();
