@@ -84,6 +84,10 @@ interface SyncBooksOptions {
   onProgress?: (progress: SyncProgress) => void | Promise<void>;
 }
 
+interface SyncHighlightOptions {
+  onProgress?: (progress: SyncProgress) => void | Promise<void>;
+}
+
 export async function validateDatabase(token: string, databaseIdOrUrl: string): Promise<DatabaseValidationResult> {
   const databaseId = extractDatabaseId(databaseIdOrUrl);
   const database = await notionRequest<NotionDatabaseResponse>(token, `/databases/${databaseId}`, {
@@ -195,7 +199,8 @@ export async function syncBooksToNotion(
 export async function syncBookHighlightsToNotion(
   settings: ExtensionSettings,
   book: WeReadNotebookBook,
-  notes: WeReadHighlightNote[]
+  notes: WeReadHighlightNote[],
+  options: SyncHighlightOptions = {}
 ): Promise<SyncSummary> {
   ensureHighlightSyncSettings(settings);
 
@@ -206,19 +211,49 @@ export async function syncBookHighlightsToNotion(
     failed: []
   };
 
+  let total = 1;
+  let completed = 0;
+  const reportProgress = async (currentTitle?: string): Promise<void> => {
+    await publishProgress(options, total, completed, summary, currentTitle);
+  };
+
+  await reportProgress(`正在查找页面：${book.title}`);
+
   try {
     const existingPageId = await findExistingHighlightPage(settings, book);
+    completed += 1;
+
     const payload = buildHighlightPagePayload(settings, book, notes, { existingPage: Boolean(existingPageId) });
+    const appendBatchCount = getChildrenBatchCount(payload.children);
 
     if (existingPageId) {
+      await reportProgress("正在读取已有页面内容");
+      const existingChildren = await listPageChildren(settings.notionToken, existingPageId);
+      total = 2 + existingChildren.length + appendBatchCount;
+      await reportProgress("正在更新页面属性");
+
       await notionRequest(settings.notionToken, `/pages/${existingPageId}`, {
         method: "PATCH",
         body: JSON.stringify({ properties: payload.properties, cover: payload.cover })
       });
-      await replacePageChildren(settings.notionToken, existingPageId, payload.children);
+      completed += 1;
+      await reportProgress(existingChildren.length > 0 ? "正在清空旧内容" : "正在写入新内容");
+
+      await archivePageChildren(settings.notionToken, existingChildren, async (archived, archiveTotal) => {
+        completed += 1;
+        await reportProgress(`正在清空旧内容：${archived} / ${archiveTotal}`);
+      });
+
+      await appendPageChildren(settings.notionToken, existingPageId, payload.children, async (batch, batchTotal) => {
+        completed += 1;
+        await reportProgress(`正在写入新内容：${batch} / ${batchTotal}`);
+      });
       summary.updated += 1;
     } else {
       const { children, ...pagePayload } = payload;
+      total = 2 + appendBatchCount;
+      await reportProgress("正在创建页面");
+
       const createdPage = await notionRequest<NotionPageResponse>(settings.notionToken, "/pages", {
         method: "POST",
         body: JSON.stringify({
@@ -226,11 +261,22 @@ export async function syncBookHighlightsToNotion(
           ...pagePayload
         })
       });
-      await appendPageChildren(settings.notionToken, createdPage.id, children);
+      completed += 1;
+      await reportProgress("正在写入页面内容");
+
+      await appendPageChildren(settings.notionToken, createdPage.id, children, async (batch, batchTotal) => {
+        completed += 1;
+        await reportProgress(`正在写入页面内容：${batch} / ${batchTotal}`);
+      });
       summary.created += 1;
     }
+
+    completed = total;
+    await reportProgress("划线同步完成");
   } catch (error) {
     summary.failed.push({ title: book.title, reason: getErrorMessage(error) });
+    completed = total;
+    await reportProgress(`划线同步失败：${book.title}`);
   }
 
   return summary;
@@ -634,25 +680,42 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
-async function replacePageChildren(token: string, pageId: string, children: NotionBlock[]): Promise<void> {
-  const existingChildren = await listPageChildren(token, pageId);
-  for (const child of existingChildren) {
+async function archivePageChildren(
+  token: string,
+  children: Array<{ id: string }>,
+  onArchived?: (archived: number, total: number) => void | Promise<void>
+): Promise<void> {
+  let archived = 0;
+  for (const child of children) {
     await notionRequest(token, `/blocks/${child.id}`, {
       method: "PATCH",
       body: JSON.stringify({ archived: true })
     });
+    archived += 1;
+    await onArchived?.(archived, children.length);
   }
-
-  await appendPageChildren(token, pageId, children);
 }
 
-async function appendPageChildren(token: string, pageId: string, children: NotionBlock[]): Promise<void> {
+async function appendPageChildren(
+  token: string,
+  pageId: string,
+  children: NotionBlock[],
+  onBatchAppended?: (batch: number, total: number) => void | Promise<void>
+): Promise<void> {
+  const batchTotal = getChildrenBatchCount(children);
+  let batch = 0;
   for (let index = 0; index < children.length; index += NOTION_CHILDREN_BATCH_SIZE) {
     await notionRequest(token, `/blocks/${pageId}/children`, {
       method: "PATCH",
       body: JSON.stringify({ children: children.slice(index, index + NOTION_CHILDREN_BATCH_SIZE) })
     });
+    batch += 1;
+    await onBatchAppended?.(batch, batchTotal);
   }
+}
+
+function getChildrenBatchCount(children: NotionBlock[]): number {
+  return Math.ceil(children.length / NOTION_CHILDREN_BATCH_SIZE);
 }
 
 async function listPageChildren(token: string, pageId: string): Promise<Array<{ id: string }>> {

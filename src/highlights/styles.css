@@ -689,6 +689,49 @@ h1 {
   padding-left: 18px;
 }
 
+.sync-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e3e8e1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1d3c2c;
+  font-size: 12px;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4eae3;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1f6b46;
+  transition: width 180ms ease;
+}
+
+.sync-progress p,
+.sync-progress small {
+  overflow: hidden;
+  color: #68736d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 860px) {
   .highlight-shell {
     width: calc(100vw - 28px);

@@ -79,7 +79,9 @@ async function handleRequest(
     }
     case "SYNC_BOOK_HIGHLIGHTS": {
       const settings = await getSettings();
-      return syncBookHighlightsToNotion(settings, request.book, request.notes);
+      return syncBookHighlightsToNotion(settings, request.book, request.notes, {
+        onProgress: (progress) => publishHighlightSyncProgress(progress)
+      });
     }
   }
 }
@@ -89,6 +91,14 @@ async function publishSyncProgress(progress: SyncProgress): Promise<void> {
     await chrome.runtime.sendMessage({ type: "SYNC_PROGRESS", progress });
   } catch {
     // The sync page may be closed while the background task continues.
+  }
+}
+
+async function publishHighlightSyncProgress(progress: SyncProgress): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({ type: "HIGHLIGHT_SYNC_PROGRESS", progress });
+  } catch {
+    // The highlights page may be closed while the background task continues.
   }
 }
 

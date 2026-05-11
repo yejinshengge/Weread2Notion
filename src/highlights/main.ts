@@ -12,6 +12,7 @@ import type {
   ExtensionSettings,
   FieldMappingEntry,
   HighlightSyncField,
+  SyncProgress,
   SyncSummary,
   WeReadHighlightNote,
   WeReadNotebookBook
@@ -32,6 +33,7 @@ interface HighlightsState {
   message: string;
   error: string;
   summary: SyncSummary | null;
+  syncProgress: SyncProgress | null;
   cacheFetchedAt: string | null;
 }
 
@@ -48,6 +50,7 @@ const state: HighlightsState = {
   message: "",
   error: "",
   summary: null,
+  syncProgress: null,
   cacheFetchedAt: null
 };
 
@@ -55,6 +58,17 @@ const app = document.querySelector<HTMLDivElement>("#app");
 document.body.classList.toggle("embedded", window.parent !== window);
 
 void init();
+
+chrome.runtime.onMessage.addListener((message: { type?: string; progress?: SyncProgress }) => {
+  if (message.type !== "HIGHLIGHT_SYNC_PROGRESS" || !message.progress) {
+    return;
+  }
+
+  state.syncing = true;
+  state.syncProgress = message.progress;
+  state.summary = message.progress.summary;
+  render();
+});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes.settings) {
@@ -98,6 +112,8 @@ function render(): void {
         ${renderBookList()}
         ${renderDetail(selectedBook, Boolean(canSync))}
       </section>
+
+      ${renderSyncProgress()}
 
       ${renderSummary()}
     </main>
@@ -379,6 +395,30 @@ function renderSummary(): string {
   `;
 }
 
+function renderSyncProgress(): string {
+  if (!state.syncing || !state.syncProgress) {
+    return "";
+  }
+
+  const { completed, total, currentTitle, summary } = state.syncProgress;
+  const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  const detail = currentTitle ?? (completed >= total ? "正在收尾..." : "准备同步...");
+
+  return `
+    <section class="sync-progress">
+      <div class="progress-heading">
+        <strong>${completed} / ${total}</strong>
+        <span>${percent}%</span>
+      </div>
+      <div class="progress-track" aria-label="划线同步进度">
+        <span style="width: ${percent}%"></span>
+      </div>
+      <p>${escapeHtml(detail)}</p>
+      <small>新建 ${summary.created} · 更新 ${summary.updated} · 失败 ${summary.failed.length}</small>
+    </section>
+  `;
+}
+
 function bindEvents(): void {
   document.querySelector("#open-options")?.addEventListener("click", openOptionsPage);
   document.querySelector<HTMLDetailsElement>(".field-config")?.addEventListener("toggle", (event) => {
@@ -522,6 +562,7 @@ async function fetchNotebooks(): Promise<void> {
   state.error = "";
   state.message = "";
   state.summary = null;
+  state.syncProgress = null;
   render();
 
   try {
@@ -555,6 +596,7 @@ async function selectBook(bookId: string): Promise<void> {
   state.error = "";
   state.message = "";
   state.summary = null;
+  state.syncProgress = null;
   render();
 
   try {
@@ -579,6 +621,12 @@ async function syncCurrentBook(): Promise<void> {
   state.error = "";
   state.message = "";
   state.summary = null;
+  state.syncProgress = {
+    total: 1,
+    completed: 0,
+    currentTitle: `正在准备同步：${book.title}`,
+    summary: { created: 0, updated: 0, skipped: 0, failed: [] }
+  };
   render();
 
   try {
@@ -596,6 +644,7 @@ async function syncCurrentBook(): Promise<void> {
     state.error = getErrorMessage(error);
   } finally {
     state.syncing = false;
+    state.syncProgress = null;
     render();
   }
 }
