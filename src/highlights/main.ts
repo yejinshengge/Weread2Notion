@@ -587,7 +587,11 @@ async function syncCurrentBook(): Promise<void> {
       book,
       notes: state.notes
     });
-    state.message = state.summary.failed.length > 0 ? "同步完成，但有失败项" : "划线同步完成";
+    if (state.summary.failed.length > 0) {
+      state.error = `划线同步失败：${state.summary.failed.map((item) => item.reason).join("；")}`;
+    } else {
+      state.message = "划线同步完成";
+    }
   } catch (error) {
     state.error = getErrorMessage(error);
   } finally {

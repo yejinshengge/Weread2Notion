@@ -34,6 +34,10 @@ interface NotionQueryResponse {
   next_cursor?: string | null;
 }
 
+interface NotionPageResponse {
+  id: string;
+}
+
 interface NotionDatabasePropertyResponse {
   id: string;
   type: NotionPropertyType;
@@ -69,6 +73,7 @@ type NotionPagePayload = {
   };
 };
 type NotionBlock = Record<string, unknown>;
+const NOTION_CHILDREN_BATCH_SIZE = 100;
 
 export interface DatabaseValidationResult {
   databaseId: string;
@@ -213,13 +218,15 @@ export async function syncBookHighlightsToNotion(
       await replacePageChildren(settings.notionToken, existingPageId, payload.children);
       summary.updated += 1;
     } else {
-      await notionRequest(settings.notionToken, "/pages", {
+      const { children, ...pagePayload } = payload;
+      const createdPage = await notionRequest<NotionPageResponse>(settings.notionToken, "/pages", {
         method: "POST",
         body: JSON.stringify({
           parent: { database_id: settings.highlightDatabaseId },
-          ...payload
+          ...pagePayload
         })
       });
+      await appendPageChildren(settings.notionToken, createdPage.id, children);
       summary.created += 1;
     }
   } catch (error) {
@@ -636,10 +643,14 @@ async function replacePageChildren(token: string, pageId: string, children: Noti
     });
   }
 
-  for (let index = 0; index < children.length; index += 100) {
+  await appendPageChildren(token, pageId, children);
+}
+
+async function appendPageChildren(token: string, pageId: string, children: NotionBlock[]): Promise<void> {
+  for (let index = 0; index < children.length; index += NOTION_CHILDREN_BATCH_SIZE) {
     await notionRequest(token, `/blocks/${pageId}/children`, {
       method: "PATCH",
-      body: JSON.stringify({ children: children.slice(index, index + 100) })
+      body: JSON.stringify({ children: children.slice(index, index + NOTION_CHILDREN_BATCH_SIZE) })
     });
   }
 }

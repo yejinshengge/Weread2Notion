@@ -50,15 +50,26 @@ interface WeReadNotebookResponse {
   books?: unknown[];
 }
 
+interface WeReadBookmarkListResponse {
+  updated?: unknown[];
+  data?: {
+    updated?: unknown[];
+  };
+}
+
 interface BookmarkLike {
   bookmarkId?: string;
   bookId?: string | number;
   markText?: string;
+  text?: string;
+  content?: string;
   chapterUid?: string | number;
   chapterIdx?: number;
   chapterTitle?: string;
+  chapterName?: string;
   range?: string;
   createTime?: number;
+  updateTime?: number;
 }
 
 interface ReviewLike {
@@ -198,8 +209,12 @@ export async function fetchWeReadHighlights(bookId: string): Promise<WeReadHighl
   const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
   const reviews = reviewResult.status === "fulfilled" ? reviewResult.value : [];
 
-  if (bookmarkResult.status === "rejected" && reviewResult.status === "rejected") {
-    throw new Error("读取划线和想法失败，请确认微信读书网页版已登录");
+  if (bookmarkResult.status === "rejected" || reviewResult.status === "rejected") {
+    const reasons = [
+      bookmarkResult.status === "rejected" ? `划线：${getErrorMessage(bookmarkResult.reason)}` : "",
+      reviewResult.status === "rejected" ? `想法：${getErrorMessage(reviewResult.reason)}` : ""
+    ].filter(Boolean);
+    throw new Error(`读取划线或想法失败：${reasons.join("；")}`);
   }
 
   return mergeHighlightNotes(bookId, bookmarks, reviews, chapters);
@@ -279,11 +294,16 @@ async function fetchBookProgress(bookId: string): Promise<WeReadProgressResponse
 }
 
 async function fetchBookmarkList(bookId: string): Promise<BookmarkLike[]> {
-  const response = await fetch(`${WEREAD_BOOKMARK_LIST_URL}?bookId=${encodeURIComponent(bookId)}`, {
+  const query = new URLSearchParams({
+    bookId,
+    synckey: "0",
+    _: String(Date.now())
+  });
+  const response = await fetch(`${WEREAD_BOOKMARK_LIST_URL}?${query.toString()}`, {
     method: "GET",
     credentials: "include",
     headers: {
-      Accept: "application/json"
+      Accept: "application/json, text/plain, */*"
     }
   });
 
@@ -291,8 +311,13 @@ async function fetchBookmarkList(bookId: string): Promise<BookmarkLike[]> {
     throw new Error(`读取《${bookId}》划线失败`);
   }
 
-  const payload = (await response.json()) as { updated?: unknown[] };
-  return Array.isArray(payload.updated) ? (payload.updated as BookmarkLike[]) : [];
+  const payload = (await response.json()) as WeReadBookmarkListResponse;
+  const bookmarks = Array.isArray(payload.updated)
+    ? payload.updated
+    : Array.isArray(payload.data?.updated)
+      ? payload.data.updated
+      : [];
+  return bookmarks.map(normalizeBookmark).filter((item): item is BookmarkLike => Boolean(item));
 }
 
 async function fetchReviewList(bookId: string): Promise<ReviewLike[]> {
@@ -374,6 +399,25 @@ function unwrapReview(item: unknown): ReviewLike | null {
   }
 
   return null;
+}
+
+function normalizeBookmark(item: unknown): BookmarkLike | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const record = item as BookmarkLike;
+  const markText = emptyToUndefined(record.markText) ?? emptyToUndefined(record.text) ?? emptyToUndefined(record.content);
+  if (!markText) {
+    return null;
+  }
+
+  return {
+    ...record,
+    markText,
+    chapterTitle: emptyToUndefined(record.chapterTitle) ?? emptyToUndefined(record.chapterName),
+    createTime: firstNumberOrUndefined(record.createTime, record.updateTime)
+  };
 }
 
 function mergeHighlightNotes(
@@ -579,4 +623,8 @@ function categoryToLabel(value: unknown): string | undefined {
 
 function isUnreadBook(book: WeReadBook): boolean {
   return book.status === "未开始" || book.progress <= 0;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "未知错误";
 }
