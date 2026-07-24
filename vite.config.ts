@@ -9,7 +9,6 @@ export default defineConfig({
       input: {
         sync: "sync.html",
         feature: "function.html",
-        highlights: "highlights.html",
         options: "options.html",
         background: "src/background/index.ts"
       },

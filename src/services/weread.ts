@@ -1,9 +1,17 @@
 import type { ReadingStatus, WeReadBook, WeReadHighlightNote, WeReadNotebookBook } from "../shared/types";
 
-interface WeReadShelfResponse {
+interface WeReadGatewayResponse {
+  errcode?: number;
+  errmsg?: string;
+  message?: string;
+  upgrade_info?: {
+    message?: string;
+    upgrade_url?: string;
+  };
+}
+
+interface WeReadShelfResponse extends WeReadGatewayResponse {
   books?: unknown[];
-  bookProgress?: unknown[] | Record<string, unknown>;
-  synckey?: number;
 }
 
 interface BookLike {
@@ -19,6 +27,7 @@ interface BookLike {
   finishReading?: boolean | number;
   readUpdateTime?: number;
   updateTime?: number;
+  deepLink?: string;
 }
 
 interface ProgressLike {
@@ -28,13 +37,11 @@ interface ProgressLike {
   finishReading?: boolean | number;
   updateTime?: number;
   startReadingTime?: number;
+  isStartReading?: boolean | number;
 }
 
-interface WeReadProgressResponse {
-  book?: {
-    updateTime?: number;
-    startReadingTime?: number;
-  };
+interface WeReadProgressResponse extends WeReadGatewayResponse {
+  book?: ProgressLike;
 }
 
 interface NotebookBookLike {
@@ -46,15 +53,13 @@ interface NotebookBookLike {
   sort?: number;
 }
 
-interface WeReadNotebookResponse {
+interface WeReadNotebookResponse extends WeReadGatewayResponse {
   books?: unknown[];
+  hasMore?: boolean | number;
 }
 
-interface WeReadBookmarkListResponse {
+interface WeReadBookmarkListResponse extends WeReadGatewayResponse {
   updated?: unknown[];
-  data?: {
-    updated?: unknown[];
-  };
 }
 
 interface BookmarkLike {
@@ -89,6 +94,12 @@ interface ReviewLike {
   };
 }
 
+interface WeReadReviewListResponse extends WeReadGatewayResponse {
+  reviews?: unknown[];
+  hasMore?: boolean | number;
+  synckey?: number;
+}
+
 interface ChapterInfoLike {
   chapterUid?: string | number;
   chapterIdx?: number;
@@ -96,101 +107,97 @@ interface ChapterInfoLike {
   anchors?: ChapterInfoLike[];
 }
 
-interface ChapterInfosResponse {
-  data?: Array<{
-    updated?: ChapterInfoLike[];
-  }>;
+interface ChapterInfosResponse extends WeReadGatewayResponse {
+  chapters?: ChapterInfoLike[];
 }
 
-const WEREAD_SHELF_URL = "https://weread.qq.com/web/shelf/sync";
-const WEREAD_PROGRESS_URL = "https://weread.qq.com/web/book/getProgress";
-const WEREAD_NOTEBOOK_URL = "https://weread.qq.com/api/user/notebook";
-const WEREAD_BOOKMARK_LIST_URL = "https://weread.qq.com/web/book/bookmarklist";
-const WEREAD_REVIEW_LIST_URL = "https://weread.qq.com/api/review/list";
-const WEREAD_CHAPTER_INFOS_URL = "https://weread.qq.com/web/book/chapterInfos";
+const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway";
+const WEREAD_SKILL_VERSION = "1.0.4";
+const WEREAD_PAGE_SIZE = 100;
+const PROGRESS_CONCURRENCY = 8;
 const READER_URL_PREFIX = "https://weread.qq.com/web/reader/";
 
-export async function fetchWeReadBooks(options: { includeStartReadAt?: boolean } = {}): Promise<WeReadBook[]> {
-  const response = await fetch(WEREAD_SHELF_URL, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json"
-    }
-  });
+class WeReadUpgradeRequiredError extends Error {}
 
-  if (!response.ok) {
-    throw new Error("微信读书接口不可用或登录已失效");
-  }
-
-  const payload = (await response.json()) as WeReadShelfResponse;
+export async function fetchWeReadBooks(
+  apiKey: string,
+  options: { includeStartReadAt?: boolean } = {}
+): Promise<WeReadBook[]> {
+  const payload = await callWeReadGateway<WeReadShelfResponse>(apiKey, "/shelf/sync");
   const books = Array.isArray(payload.books) ? payload.books : [];
-  const progressList = normalizeProgressList(payload.bookProgress);
-  const progressByBookId = new Map<string, ProgressLike>();
-
-  for (const item of progressList) {
-    const progress = item as ProgressLike;
-    const bookId = toStringValue(progress.bookId);
-    if (bookId) {
-      progressByBookId.set(bookId, progress);
-    }
-  }
-
   const normalizedBooks = books
-    .map((item) => normalizeBook(item as BookLike, progressByBookId))
+    .map((item) => normalizeBook(item as BookLike))
     .filter((book): book is WeReadBook => Boolean(book));
 
-  return options.includeStartReadAt ? enrichBooksWithProgress(normalizedBooks) : normalizedBooks;
+  return enrichBooksWithProgress(apiKey, normalizedBooks, options);
 }
 
-export async function enrichBooksWithProgress(books: WeReadBook[]): Promise<WeReadBook[]> {
-  const enrichedBooks: WeReadBook[] = [];
+async function enrichBooksWithProgress(
+  apiKey: string,
+  books: WeReadBook[],
+  options: { includeStartReadAt?: boolean }
+): Promise<WeReadBook[]> {
+  const enrichedBooks = [...books];
+  let nextIndex = 0;
 
-  for (const book of books) {
-    if (isUnreadBook(book)) {
-      enrichedBooks.push({
-        ...book,
-        startReadAt: undefined,
-        lastReadAt: undefined
-      });
-      continue;
-    }
+  async function worker(): Promise<void> {
+    while (nextIndex < books.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const book = books[index];
 
-    if (book.startReadAt) {
-      enrichedBooks.push(book);
-      continue;
-    }
-
-    try {
-      const progress = await fetchBookProgress(book.bookId);
-      enrichedBooks.push({
-        ...book,
-        startReadAt: unixSecondsToIso(progress.book?.startReadingTime) ?? book.startReadAt,
-        lastReadAt: unixSecondsToIso(progress.book?.updateTime) ?? book.lastReadAt
-      });
-    } catch {
-      enrichedBooks.push(book);
+      try {
+        const payload = await fetchBookProgress(apiKey, book.bookId);
+        const progressRecord = payload.book;
+        const progress = clampProgress(firstNumber(progressRecord?.progress, book.progress));
+        const started = Boolean(progressRecord?.isStartReading) || progress > 0;
+        enrichedBooks[index] = {
+          ...book,
+          progress,
+          status: getReadingStatus(progress, book.status === "已读完", started),
+          startReadAt: options.includeStartReadAt
+            ? unixSecondsToIso(progressRecord?.startReadingTime) ?? book.startReadAt
+            : undefined,
+          lastReadAt: started ? unixSecondsToIso(progressRecord?.updateTime) ?? book.lastReadAt : undefined
+        };
+      } catch (error) {
+        if (error instanceof WeReadUpgradeRequiredError) {
+          throw error;
+        }
+        enrichedBooks[index] = book;
+      }
     }
   }
 
+  const workerCount = Math.min(PROGRESS_CONCURRENCY, books.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return enrichedBooks;
 }
 
-export async function fetchWeReadNotebooks(): Promise<WeReadNotebookBook[]> {
-  const response = await fetch(WEREAD_NOTEBOOK_URL, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json"
+export async function fetchWeReadNotebooks(apiKey: string): Promise<WeReadNotebookBook[]> {
+  const books: unknown[] = [];
+  const seenCursors = new Set<number>();
+  let lastSort: number | undefined;
+
+  while (true) {
+    const payload = await callWeReadGateway<WeReadNotebookResponse>(apiKey, "/user/notebooks", {
+      count: WEREAD_PAGE_SIZE,
+      ...(lastSort === undefined ? {} : { lastSort })
+    });
+    const pageBooks = Array.isArray(payload.books) ? payload.books : [];
+    books.push(...pageBooks);
+
+    if (!payload.hasMore) {
+      break;
     }
-  });
 
-  if (!response.ok) {
-    throw new Error("微信读书笔记接口不可用或登录已失效");
+    const nextLastSort = firstNumberOrUndefined((pageBooks.at(-1) as NotebookBookLike | undefined)?.sort);
+    if (nextLastSort === undefined || seenCursors.has(nextLastSort)) {
+      throw new Error("微信读书笔记分页游标无效，已停止读取以避免重复数据");
+    }
+    seenCursors.add(nextLastSort);
+    lastSort = nextLastSort;
   }
-
-  const payload = (await response.json()) as WeReadNotebookResponse;
-  const books = Array.isArray(payload.books) ? payload.books : [];
 
   return books
     .map((item) => normalizeNotebookBook(item as NotebookBookLike))
@@ -198,12 +205,18 @@ export async function fetchWeReadNotebooks(): Promise<WeReadNotebookBook[]> {
     .sort((first, second) => (second.sort ?? 0) - (first.sort ?? 0));
 }
 
-export async function fetchWeReadHighlights(bookId: string): Promise<WeReadHighlightNote[]> {
+export async function fetchWeReadHighlights(apiKey: string, bookId: string): Promise<WeReadHighlightNote[]> {
   const [chapterResult, bookmarkResult, reviewResult] = await Promise.allSettled([
-    fetchChapterInfo(bookId),
-    fetchBookmarkList(bookId),
-    fetchReviewList(bookId)
+    fetchChapterInfo(apiKey, bookId),
+    fetchBookmarkList(apiKey, bookId),
+    fetchReviewList(apiKey, bookId)
   ]);
+
+  for (const result of [chapterResult, bookmarkResult, reviewResult]) {
+    if (result.status === "rejected" && result.reason instanceof WeReadUpgradeRequiredError) {
+      throw result.reason;
+    }
+  }
 
   const chapters = chapterResult.status === "fulfilled" ? chapterResult.value : new Map<string, ChapterInfoLike>();
   const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
@@ -220,18 +233,15 @@ export async function fetchWeReadHighlights(bookId: string): Promise<WeReadHighl
   return mergeHighlightNotes(bookId, bookmarks, reviews, chapters);
 }
 
-function normalizeBook(book: BookLike, progressByBookId: Map<string, ProgressLike>): WeReadBook | null {
+function normalizeBook(book: BookLike): WeReadBook | null {
   const bookId = toStringValue(book.bookId);
   const title = book.title || book.name;
   if (!bookId || !title) {
     return null;
   }
 
-  const progressRecord = progressByBookId.get(bookId);
-  const progress = clampProgress(
-    firstNumber(progressRecord?.progress, progressRecord?.readingProgress, book.progress, book.readingProgress)
-  );
-  const finishReading = Boolean(progressRecord?.finishReading || book.finishReading);
+  const progress = clampProgress(firstNumber(book.progress, book.readingProgress));
+  const finishReading = Boolean(book.finishReading);
   const status = getReadingStatus(progress, finishReading);
   const started = status !== "未开始";
 
@@ -242,12 +252,9 @@ function normalizeBook(book: BookLike, progressByBookId: Map<string, ProgressLik
     progress,
     author: emptyToUndefined(book.author),
     category: normalizeCategory(book),
-    url: `${READER_URL_PREFIX}${bookId}`,
+    url: emptyToUndefined(book.deepLink) ?? `${READER_URL_PREFIX}${bookId}`,
     status,
-    startReadAt: started ? unixSecondsToIso(progressRecord?.startReadingTime) : undefined,
-    lastReadAt: started
-      ? unixSecondsToIso(firstNumberOrUndefined(progressRecord?.updateTime, book.readUpdateTime))
-      : undefined
+    lastReadAt: started ? unixSecondsToIso(firstNumberOrUndefined(book.readUpdateTime, book.updateTime)) : undefined
   };
 }
 
@@ -259,9 +266,8 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
     return null;
   }
 
-  const rawBookmarkCount = firstNumber(item.bookmarkCount);
-  const fallbackBookmarkCount = firstNumber(item.noteCount);
-  const bookmarkCount = rawBookmarkCount > 0 ? rawBookmarkCount : fallbackBookmarkCount;
+  const highlightCount = firstNumber(item.noteCount);
+  const bookmarkCount = firstNumber(item.bookmarkCount);
   const reviewCount = firstNumber(item.reviewCount);
 
   return {
@@ -269,101 +275,58 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
     title,
     cover: normalizeCover(book?.cover),
     author: emptyToUndefined(book?.author),
-    url: `${READER_URL_PREFIX}${bookId}`,
-    noteCount: firstNumber(item.noteCount),
-    bookmarkCount,
+    url: emptyToUndefined(book?.deepLink) ?? `${READER_URL_PREFIX}${bookId}`,
+    noteCount: highlightCount + bookmarkCount + reviewCount,
+    bookmarkCount: highlightCount,
     reviewCount,
     sort: firstNumberOrUndefined(item.sort)
   };
 }
 
-async function fetchBookProgress(bookId: string): Promise<WeReadProgressResponse> {
-  const response = await fetch(`${WEREAD_PROGRESS_URL}?bookId=${encodeURIComponent(bookId)}`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`读取《${bookId}》阅读时间失败`);
-  }
-
-  return (await response.json()) as WeReadProgressResponse;
+async function fetchBookProgress(apiKey: string, bookId: string): Promise<WeReadProgressResponse> {
+  return callWeReadGateway<WeReadProgressResponse>(apiKey, "/book/getprogress", { bookId });
 }
 
-async function fetchBookmarkList(bookId: string): Promise<BookmarkLike[]> {
-  const query = new URLSearchParams({
-    bookId,
-    synckey: "0",
-    _: String(Date.now())
-  });
-  const response = await fetch(`${WEREAD_BOOKMARK_LIST_URL}?${query.toString()}`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json, text/plain, */*"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`读取《${bookId}》划线失败`);
-  }
-
-  const payload = (await response.json()) as WeReadBookmarkListResponse;
-  const bookmarks = Array.isArray(payload.updated)
-    ? payload.updated
-    : Array.isArray(payload.data?.updated)
-      ? payload.data.updated
-      : [];
+async function fetchBookmarkList(apiKey: string, bookId: string): Promise<BookmarkLike[]> {
+  const payload = await callWeReadGateway<WeReadBookmarkListResponse>(apiKey, "/book/bookmarklist", { bookId });
+  const bookmarks = Array.isArray(payload.updated) ? payload.updated : [];
   return bookmarks.map(normalizeBookmark).filter((item): item is BookmarkLike => Boolean(item));
 }
 
-async function fetchReviewList(bookId: string): Promise<ReviewLike[]> {
-  const response = await fetch(
-    `${WEREAD_REVIEW_LIST_URL}?bookId=${encodeURIComponent(bookId)}&listType=11&mine=1&synckey=0`,
-    {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        Accept: "application/json"
-      }
-    }
-  );
+async function fetchReviewList(apiKey: string, bookId: string): Promise<ReviewLike[]> {
+  const reviews: ReviewLike[] = [];
+  const seenCursors = new Set<number>([0]);
+  let synckey = 0;
 
-  if (!response.ok) {
-    throw new Error(`读取《${bookId}》想法失败`);
+  while (true) {
+    const payload = await callWeReadGateway<WeReadReviewListResponse>(apiKey, "/review/list/mine", {
+      bookid: bookId,
+      synckey,
+      count: WEREAD_PAGE_SIZE
+    });
+    if (Array.isArray(payload.reviews)) {
+      reviews.push(...payload.reviews.map(unwrapReview).filter((item): item is ReviewLike => Boolean(item)));
+    }
+
+    if (!payload.hasMore) {
+      break;
+    }
+
+    const nextSynckey = firstNumberOrUndefined(payload.synckey);
+    if (nextSynckey === undefined || seenCursors.has(nextSynckey)) {
+      throw new Error(`读取《${bookId}》想法时分页游标无效`);
+    }
+    seenCursors.add(nextSynckey);
+    synckey = nextSynckey;
   }
 
-  const payload = (await response.json()) as { reviews?: unknown[] };
-  return Array.isArray(payload.reviews)
-    ? payload.reviews.map(unwrapReview).filter((item): item is ReviewLike => Boolean(item))
-    : [];
+  return reviews;
 }
 
-async function fetchChapterInfo(bookId: string): Promise<Map<string, ChapterInfoLike>> {
-  const response = await fetch(WEREAD_CHAPTER_INFOS_URL, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json, text/plain, */*",
-      "Content-Type": "application/json;charset=UTF-8"
-    },
-    body: JSON.stringify({
-      bookIds: [bookId],
-      synckeys: [0],
-      teenmode: 0
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`读取《${bookId}》章节失败`);
-  }
-
-  const payload = (await response.json()) as ChapterInfosResponse;
+async function fetchChapterInfo(apiKey: string, bookId: string): Promise<Map<string, ChapterInfoLike>> {
+  const payload = await callWeReadGateway<ChapterInfosResponse>(apiKey, "/book/chapterinfo", { bookId });
   const chapters = new Map<string, ChapterInfoLike>();
-  for (const item of payload.data?.[0]?.updated ?? []) {
+  for (const item of payload.chapters ?? []) {
     addChapter(chapters, item);
     for (const anchor of item.anchors ?? []) {
       addChapter(chapters, anchor);
@@ -377,6 +340,53 @@ function addChapter(chapters: Map<string, ChapterInfoLike>, chapter: ChapterInfo
   if (chapterUid) {
     chapters.set(chapterUid, chapter);
   }
+}
+
+async function callWeReadGateway<T extends WeReadGatewayResponse>(
+  apiKey: string,
+  apiName: string,
+  params: Record<string, unknown> = {}
+): Promise<T> {
+  const normalizedApiKey = apiKey.trim();
+  if (!normalizedApiKey) {
+    throw new Error("请先在配置页填写 WEREAD_API_KEY");
+  }
+  if (!normalizedApiKey.startsWith("wrk-")) {
+    throw new Error("WEREAD_API_KEY 格式无效，应以 wrk- 开头");
+  }
+
+  const response = await fetch(WEREAD_GATEWAY_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${normalizedApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      ...params,
+      api_name: apiName,
+      skill_version: WEREAD_SKILL_VERSION
+    })
+  });
+
+  let payload: WeReadGatewayResponse;
+  try {
+    payload = (await response.json()) as WeReadGatewayResponse;
+  } catch {
+    throw new Error(`微信读书接口返回了无法解析的响应（HTTP ${response.status}）`);
+  }
+
+  if (payload.upgrade_info) {
+    const upgradeMessage = payload.upgrade_info.message?.trim() || "当前微信读书技能版本需要升级";
+    throw new WeReadUpgradeRequiredError(`微信读书接口已暂停：${upgradeMessage}`);
+  }
+
+  if (!response.ok || (typeof payload.errcode === "number" && payload.errcode !== 0)) {
+    const detail = payload.errmsg?.trim() || payload.message?.trim();
+    throw new Error(detail || `微信读书接口调用失败（HTTP ${response.status}）`);
+  }
+
+  return payload as T;
 }
 
 function unwrapReview(item: unknown): ReviewLike | null {
@@ -524,24 +534,11 @@ function compareNotes(first: WeReadHighlightNote, second: WeReadHighlightNote): 
   return (first.createTime ?? 0) - (second.createTime ?? 0);
 }
 
-function normalizeProgressList(bookProgress: WeReadShelfResponse["bookProgress"]): unknown[] {
-  if (Array.isArray(bookProgress)) {
-    return bookProgress;
-  }
-  if (bookProgress && typeof bookProgress === "object") {
-    return Object.entries(bookProgress).map(([bookId, value]) => ({
-      ...(typeof value === "object" && value !== null ? value : {}),
-      bookId
-    }));
-  }
-  return [];
-}
-
-function getReadingStatus(progress: number, finishReading: boolean): ReadingStatus {
+function getReadingStatus(progress: number, finishReading: boolean, isStartReading = false): ReadingStatus {
   if (finishReading || progress >= 100) {
     return "已读完";
   }
-  if (progress <= 0) {
+  if (progress <= 0 && !isStartReading) {
     return "未开始";
   }
   return "阅读中";
@@ -619,10 +616,6 @@ function categoryToLabel(value: unknown): string | undefined {
   }
 
   return undefined;
-}
-
-function isUnreadBook(book: WeReadBook): boolean {
-  return book.status === "未开始" || book.progress <= 0;
 }
 
 function getErrorMessage(error: unknown): string {

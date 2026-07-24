@@ -8,7 +8,6 @@ interface OptionsState {
   settings: ExtensionSettings | null;
   saving: boolean;
   validating: boolean;
-  validatingHighlights: boolean;
   message: string;
   error: string;
   toast: {
@@ -21,7 +20,6 @@ const state: OptionsState = {
   settings: null,
   saving: false,
   validating: false,
-  validatingHighlights: false,
   message: "",
   error: "",
   toast: null
@@ -46,9 +44,7 @@ function render(): void {
 
   const settings = state.settings;
   const titleProperty = getTitleProperty(settings.databaseProperties);
-  const highlightTitleProperty = getTitleProperty(settings.highlightDatabaseProperties);
   const propertiesLoaded = settings.databaseProperties.length > 0;
-  const highlightPropertiesLoaded = settings.highlightDatabaseProperties.length > 0;
 
   app.innerHTML = `
     <main class="settings-shell">
@@ -59,12 +55,20 @@ function render(): void {
         </div>
         <div class="hero-actions">
           <span>${settings.lastValidatedAt ? `上次验证：${formatDate(settings.lastValidatedAt)}` : "尚未验证数据库"}</span>
-          <button class="secondary-link" id="open-sync-page" type="button">打开书架同步</button>
-          <button class="secondary-link" id="open-highlights-page" type="button">打开划线同步</button>
+          <button class="secondary-link" id="open-sync-page" type="button">打开书籍同步</button>
         </div>
       </header>
 
       ${renderMessage()}
+
+      <section class="panel">
+        <h2>微信读书连接</h2>
+        <p class="hint">使用 WEREAD_API_KEY，通过微信读书 Agent API Gateway 读取书架和笔记。</p>
+        <label>
+          <span>WEREAD_API_KEY</span>
+          <input id="weread-api-key" type="password" value="${escapeAttribute(settings.wereadApiKey)}" placeholder="wrk-..." autocomplete="off" />
+        </label>
+      </section>
 
       <section class="panel">
         <h2>Notion 连接</h2>
@@ -85,41 +89,11 @@ function render(): void {
           <button id="validate-database" class="primary" ${state.validating ? "disabled" : ""}>
             ${state.validating ? "验证中..." : "验证数据库"}
           </button>
-          <p>${propertiesLoaded ? `已读取 ${settings.databaseProperties.length} 个字段` : "验证后到书架同步页配置字段"}</p>
+          <p>${propertiesLoaded ? `已读取 ${settings.databaseProperties.length} 个字段` : "验证后到书籍同步页配置字段"}</p>
         </div>
         ${
           propertiesLoaded && !titleProperty
             ? `<p class="field-error">数据库必须包含 title 类型字段。</p>`
-            : ""
-        }
-      </section>
-
-      <section class="panel">
-        <h2>划线同步数据库</h2>
-        <p class="hint">${
-          highlightTitleProperty
-            ? `每本书会同步为一个 Notion 页面，页面标题写入「${escapeHtml(highlightTitleProperty.name)}」。如数据库有「WeRead ID」或「Book ID」字段，会优先用它防重复。`
-            : "每本书会同步为一个 Notion 页面，原文和想法写在页面内容里。建议增加一个 rich_text 类型的「WeRead ID」字段用于防重复。"
-        }</p>
-        <label>
-          <span>划线数据库 URL 或 ID</span>
-          <input id="highlight-database-url" type="text" value="${escapeAttribute(
-            settings.highlightDatabaseUrl || settings.highlightDatabaseId
-          )}" placeholder="https://www.notion.so/..." />
-        </label>
-        <div class="actions">
-          <button id="validate-highlight-database" class="primary" ${state.validatingHighlights ? "disabled" : ""}>
-            ${state.validatingHighlights ? "验证中..." : "验证划线数据库"}
-          </button>
-          <p>${
-            highlightPropertiesLoaded
-              ? `已读取 ${settings.highlightDatabaseProperties.length} 个字段`
-              : "验证后即可同步划线"
-          }</p>
-        </div>
-        ${
-          highlightPropertiesLoaded && !highlightTitleProperty
-            ? `<p class="field-error">划线数据库必须包含 title 类型字段。</p>`
             : ""
         }
       </section>
@@ -161,9 +135,7 @@ function renderToast(): string {
 
 function bindEvents(): void {
   document.querySelector("#open-sync-page")?.addEventListener("click", openSyncPage);
-  document.querySelector("#open-highlights-page")?.addEventListener("click", openHighlightsPage);
   document.querySelector("#validate-database")?.addEventListener("click", validateDatabaseFromForm);
-  document.querySelector("#validate-highlight-database")?.addEventListener("click", validateHighlightDatabaseFromForm);
   document.querySelector("#save-settings")?.addEventListener("click", saveSettingsFromForm);
 }
 
@@ -176,22 +148,15 @@ function openSyncPage(): void {
   window.location.href = chrome.runtime.getURL("sync.html");
 }
 
-function openHighlightsPage(): void {
-  if (window.parent !== window) {
-    window.parent.postMessage({ type: "SWITCH_TAB", tab: "highlights" }, window.location.origin);
-    return;
-  }
-
-  window.location.href = chrome.runtime.getURL("sync.html#highlights");
-}
-
 async function validateDatabaseFromForm(): Promise<void> {
+  const wereadApiKey = readInputValue("#weread-api-key");
   const token = readInputValue("#notion-token");
   const databaseIdOrUrl = readInputValue("#database-url");
 
   if (state.settings) {
     state.settings = {
       ...state.settings,
+      wereadApiKey,
       notionToken: token,
       databaseUrl: databaseIdOrUrl
     };
@@ -203,40 +168,15 @@ async function validateDatabaseFromForm(): Promise<void> {
 
   try {
     await sendBackgroundMessage({ type: "VALIDATE_NOTION", token, databaseIdOrUrl });
-    state.settings = await getSettings();
+    state.settings = {
+      ...(await getSettings()),
+      wereadApiKey
+    };
     state.message = "Notion 数据库验证成功";
   } catch (error) {
     state.error = getErrorMessage(error);
   } finally {
     state.validating = false;
-    render();
-  }
-}
-
-async function validateHighlightDatabaseFromForm(): Promise<void> {
-  const token = readInputValue("#notion-token");
-  const databaseIdOrUrl = readInputValue("#highlight-database-url");
-
-  if (state.settings) {
-    state.settings = {
-      ...state.settings,
-      notionToken: token,
-      highlightDatabaseUrl: databaseIdOrUrl
-    };
-  }
-  state.validatingHighlights = true;
-  state.message = "";
-  state.error = "";
-  render();
-
-  try {
-    await sendBackgroundMessage({ type: "VALIDATE_HIGHLIGHT_NOTION", token, databaseIdOrUrl });
-    state.settings = await getSettings();
-    state.message = "划线同步数据库验证成功";
-  } catch (error) {
-    state.error = getErrorMessage(error);
-  } finally {
-    state.validatingHighlights = false;
     render();
   }
 }
@@ -248,9 +188,9 @@ async function saveSettingsFromForm(): Promise<void> {
 
   const nextSettings: ExtensionSettings = {
     ...state.settings,
+    wereadApiKey: readInputValue("#weread-api-key"),
     notionToken: readInputValue("#notion-token"),
-    databaseUrl: readInputValue("#database-url"),
-    highlightDatabaseUrl: readInputValue("#highlight-database-url")
+    databaseUrl: readInputValue("#database-url")
   };
 
   state.settings = nextSettings;

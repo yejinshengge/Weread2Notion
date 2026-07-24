@@ -4,12 +4,10 @@ import type {
   BackgroundResponse,
   SyncProgress,
   SyncSummary,
-  WeReadBook,
-  WeReadHighlightNote,
-  WeReadNotebookBook
+  WeReadBook
 } from "../shared/types";
-import { searchDatabasePages, syncBookHighlightsToNotion, syncBooksToNotion, validateDatabase } from "../services/notion";
-import { enrichBooksWithProgress, fetchWeReadBooks, fetchWeReadHighlights, fetchWeReadNotebooks } from "../services/weread";
+import { searchDatabasePages, syncBooksToNotion, validateDatabase } from "../services/notion";
+import { fetchWeReadBooks, fetchWeReadHighlights, fetchWeReadNotebooks } from "../services/weread";
 
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("sync.html") });
@@ -25,17 +23,11 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, _sender, sendR
 
 async function handleRequest(
   request: BackgroundRequest
-): Promise<WeReadBook[] | WeReadNotebookBook[] | WeReadHighlightNote[] | SyncSummary | unknown> {
+): Promise<WeReadBook[] | SyncSummary | unknown> {
   switch (request.type) {
     case "FETCH_WEREAD_BOOKS": {
       const settings = await getSettings();
-      return fetchWeReadBooks({ includeStartReadAt: isStartReadAtEnabled(settings) });
-    }
-    case "FETCH_WEREAD_NOTEBOOKS": {
-      return fetchWeReadNotebooks();
-    }
-    case "FETCH_WEREAD_HIGHLIGHTS": {
-      return fetchWeReadHighlights(request.book.bookId);
+      return fetchWeReadBooks(settings.wereadApiKey, { includeStartReadAt: isStartReadAtEnabled(settings) });
     }
     case "VALIDATE_NOTION": {
       const validation = await validateDatabase(request.token, request.databaseIdOrUrl);
@@ -45,21 +37,9 @@ async function handleRequest(
         notionToken: request.token,
         databaseUrl: request.databaseIdOrUrl,
         databaseId: validation.databaseId,
+        dataSourceId: validation.dataSourceId,
         databaseProperties: validation.properties,
         lastValidatedAt: new Date().toISOString()
-      });
-      return validation;
-    }
-    case "VALIDATE_HIGHLIGHT_NOTION": {
-      const validation = await validateDatabase(request.token, request.databaseIdOrUrl);
-      const settings = await getSettings();
-      await saveSettings({
-        ...settings,
-        notionToken: request.token,
-        highlightDatabaseUrl: request.databaseIdOrUrl,
-        highlightDatabaseId: validation.databaseId,
-        highlightDatabaseProperties: validation.properties,
-        lastHighlightValidatedAt: new Date().toISOString()
       });
       return validation;
     }
@@ -72,15 +52,14 @@ async function handleRequest(
     }
     case "SYNC_BOOKS": {
       const settings = await getSettings();
-      const books = isStartReadAtEnabled(settings) ? await enrichBooksWithProgress(request.books) : request.books;
-      return syncBooksToNotion(settings, books, {
-        onProgress: (progress) => publishSyncProgress(progress)
-      });
-    }
-    case "SYNC_BOOK_HIGHLIGHTS": {
-      const settings = await getSettings();
-      return syncBookHighlightsToNotion(settings, request.book, request.notes, {
-        onProgress: (progress) => publishHighlightSyncProgress(progress)
+      const notebooks = await fetchWeReadNotebooks(settings.wereadApiKey);
+      const notebookBookIds = new Set(notebooks.map((book) => book.bookId));
+      return syncBooksToNotion(settings, request.books, {
+        onProgress: (progress) => publishSyncProgress(progress),
+        getHighlights: (book) =>
+          notebookBookIds.has(book.bookId)
+            ? fetchWeReadHighlights(settings.wereadApiKey, book.bookId)
+            : Promise.resolve([])
       });
     }
   }
@@ -91,14 +70,6 @@ async function publishSyncProgress(progress: SyncProgress): Promise<void> {
     await chrome.runtime.sendMessage({ type: "SYNC_PROGRESS", progress });
   } catch {
     // The sync page may be closed while the background task continues.
-  }
-}
-
-async function publishHighlightSyncProgress(progress: SyncProgress): Promise<void> {
-  try {
-    await chrome.runtime.sendMessage({ type: "HIGHLIGHT_SYNC_PROGRESS", progress });
-  } catch {
-    // The highlights page may be closed while the background task continues.
   }
 }
 

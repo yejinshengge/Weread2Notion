@@ -1,7 +1,6 @@
 import type {
   FieldMappingEntry,
   FieldMappings,
-  HighlightSyncField,
   NotionPropertyType,
   SyncField
 } from "./types";
@@ -28,28 +27,6 @@ export const SYNC_FIELDS: SyncField[] = [
   "wereadId"
 ];
 
-export const HIGHLIGHT_FIELD_LABELS: Record<HighlightSyncField, string> = {
-  cover: "封面",
-  author: "作者",
-  url: "微信读书链接",
-  bookId: "Book ID",
-  noteCount: "笔记总数",
-  bookmarkCount: "划线数量",
-  reviewCount: "想法数量",
-  lastSyncedAt: "最后同步时间"
-};
-
-export const HIGHLIGHT_SYNC_FIELDS: HighlightSyncField[] = [
-  "cover",
-  "author",
-  "url",
-  "bookId",
-  "noteCount",
-  "bookmarkCount",
-  "reviewCount",
-  "lastSyncedAt"
-];
-
 export const DEFAULT_MAPPINGS: FieldMappings = {
   cover: { enabled: false, propertyName: "", overwriteOnUpdate: false },
   progress: { enabled: false, propertyName: "", overwriteOnUpdate: false },
@@ -62,8 +39,6 @@ export const DEFAULT_MAPPINGS: FieldMappings = {
 };
 
 export const DEFAULT_FIELD_MAPPINGS: Array<FieldMappingEntry<SyncField>> = [];
-
-export const DEFAULT_HIGHLIGHT_FIELD_MAPPINGS: Array<FieldMappingEntry<HighlightSyncField>> = [];
 
 export const WRITABLE_PROPERTY_TYPES: NotionPropertyType[] = [
   "rich_text",
@@ -105,24 +80,6 @@ export function isCompatibleProperty(field: SyncField, propertyType: NotionPrope
   return getBookAllowedTypes(field).includes(propertyType);
 }
 
-export function getHighlightAllowedTypes(field: HighlightSyncField): NotionPropertyType[] {
-  switch (field) {
-    case "cover":
-      return ["url", "files", "rich_text"];
-    case "url":
-      return ["url", "rich_text"];
-    case "noteCount":
-    case "bookmarkCount":
-    case "reviewCount":
-      return ["number", "rich_text"];
-    case "lastSyncedAt":
-      return ["date", "rich_text"];
-    case "author":
-    case "bookId":
-      return ["rich_text", "select"];
-  }
-}
-
 export function getCustomAllowedTypes(): NotionPropertyType[] {
   return WRITABLE_PROPERTY_TYPES;
 }
@@ -139,14 +96,4 @@ export function isBookEntryCompatible(
     return isWritablePropertyType(propertyType);
   }
   return Boolean(entry.sourceField && getBookAllowedTypes(entry.sourceField).includes(propertyType));
-}
-
-export function isHighlightEntryCompatible(
-  entry: FieldMappingEntry<HighlightSyncField>,
-  propertyType: NotionPropertyType
-): boolean {
-  if (entry.sourceType === "custom") {
-    return isWritablePropertyType(propertyType);
-  }
-  return Boolean(entry.sourceField && getHighlightAllowedTypes(entry.sourceField).includes(propertyType));
 }

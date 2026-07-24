@@ -13,7 +13,7 @@
   "options_page": "options.html",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://weread.qq.com/*",
+    "https://i.weread.qq.com/*",
     "https://api.notion.com/*"
   ]
 }

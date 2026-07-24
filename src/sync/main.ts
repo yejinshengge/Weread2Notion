@@ -87,8 +87,8 @@ function render(): void {
     <main class="sync-shell">
       <header class="topbar">
         <div>
-          <h1>书架同步</h1>
-          <p>${configured ? "读取书架并同步选中的书籍" : "请先到配置页完成 Notion 连接，并在本页配置 WeRead ID 字段"}</p>
+          <h1>书籍与划线同步</h1>
+          <p>${configured ? "同步书籍字段，并把划线与想法写入对应书籍页面" : "请先到配置页完成 Notion 连接，并在本页配置 WeRead ID 字段"}</p>
         </div>
         <button class="icon-button" id="open-options" title="切换到配置页">配置页</button>
       </header>
@@ -114,7 +114,7 @@ function render(): void {
       <footer class="footer">
         <span>${state.books.length > 0 ? `已选择 ${selectedCount} / ${state.books.length}` : "等待读取微信读书书架"}</span>
         <button id="sync-books" class="primary" ${canSync ? "" : "disabled"}>
-          ${state.syncing ? "同步中..." : "同步到 Notion"}
+          ${state.syncing ? "同步中..." : "同步书籍与划线"}
         </button>
       </footer>
     </main>
@@ -136,7 +136,8 @@ function renderStatus(configured: boolean): string {
   const mapping = getBookIdMapping();
   const idReady = Boolean(mapping?.propertyName && state.settings && !getBookFieldMappingError(mapping, state.settings.databaseProperties));
   const items = [
-    configured ? "Notion 已连接" : "Notion 未配置",
+    state.settings?.wereadApiKey ? "微信读书 API 已配置" : "微信读书 API 未配置",
+    state.settings?.notionToken && state.settings.dataSourceId ? "Notion 已连接" : "Notion 未配置",
     idReady ? `去重字段：${escapeHtml(mapping?.propertyName ?? "")}` : "缺少 WeRead ID 映射"
   ];
   if (state.cacheFetchedAt && state.books.length > 0) {
@@ -161,17 +162,20 @@ function renderFieldConfig(): string {
 
   const titleProperty = getTitleProperty(settings.databaseProperties);
   const fieldsLoaded = settings.databaseProperties.length > 0;
+  const selectedPropertyNames = new Set(
+    settings.fieldMappings.map((entry) => entry.propertyName).filter(Boolean)
+  );
   const hint = fieldsLoaded
     ? titleProperty
       ? `书名会自动写入 title 字段「${escapeHtml(titleProperty.name)}」。下面的条目只负责额外字段。`
       : "当前数据库缺少 title 类型字段，请回到配置页重新验证数据库。"
-    : "验证书架数据库后，可以在这里添加要同步到 Notion 的字段条目。";
+    : "验证书籍数据库后，可以在这里添加要同步到 Notion 的字段条目。";
 
   return `
     <details class="field-config" ${state.fieldConfigOpen ? "open" : ""}>
       <summary class="field-config-summary">
         <div>
-          <h2>书架字段</h2>
+          <h2>书籍字段</h2>
           <p>${hint}</p>
         </div>
         <span class="field-summary-meta">
@@ -193,7 +197,9 @@ function renderFieldConfig(): string {
         <div class="field-entry-list">
           ${
             settings.fieldMappings.length > 0
-              ? settings.fieldMappings.map((entry) => renderFieldEntry(entry, settings.databaseProperties)).join("")
+              ? settings.fieldMappings
+                  .map((entry) => renderFieldEntry(entry, settings.databaseProperties, selectedPropertyNames))
+                  .join("")
               : `<p class="empty-fields">还没有字段条目。添加一个 WeRead ID 条目用于去重，再按需添加作者、状态、备注等字段。</p>`
           }
         </div>
@@ -211,7 +217,11 @@ function renderFieldConfig(): string {
   `;
 }
 
-function renderFieldEntry(entry: FieldMappingEntry<SyncField>, properties: DatabaseProperty[]): string {
+function renderFieldEntry(
+  entry: FieldMappingEntry<SyncField>,
+  properties: DatabaseProperty[],
+  selectedPropertyNames: Set<string>
+): string {
   const property = properties.find((item) => item.name === entry.propertyName);
   const error = getBookFieldMappingError(entry, properties);
   const customMode = entry.sourceType === "custom";
@@ -223,7 +233,11 @@ function renderFieldEntry(entry: FieldMappingEntry<SyncField>, properties: Datab
       <select data-entry-property="${escapeAttribute(entry.id)}">
         <option value="">选择 Notion 字段</option>
         ${properties
-          .filter((item) => isWritablePropertyType(item.type))
+          .filter(
+            (item) =>
+              isWritablePropertyType(item.type) &&
+              (item.name === entry.propertyName || !selectedPropertyNames.has(item.name))
+          )
           .map(
             (item) =>
               `<option value="${escapeAttribute(item.name)}" ${
@@ -262,7 +276,7 @@ function renderBooks(): string {
   if (state.books.length === 0) {
     return `
       <section class="empty">
-        <p>登录微信读书网页版后，点击“读取书架”。</p>
+        <p>在配置页填写 WEREAD_API_KEY 后，点击“读取书架”。</p>
       </section>
     `;
   }
@@ -497,7 +511,7 @@ async function saveFieldConfig(): Promise<void> {
 
   try {
     await saveSettings(state.settings);
-    state.message = "书架字段配置已保存";
+    state.message = "书籍字段配置已保存";
   } catch (error) {
     state.error = getErrorMessage(error);
   } finally {
@@ -543,7 +557,7 @@ async function syncSelectedBooks(): Promise<void> {
 
   try {
     state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks });
-    state.message = "同步完成";
+    state.message = "书籍与划线同步完成";
   } catch (error) {
     state.error = getErrorMessage(error);
   } finally {
@@ -558,6 +572,8 @@ function isConfigured(settings: ExtensionSettings | null): boolean {
   return Boolean(
     settings?.notionToken &&
       settings.databaseId &&
+      settings.dataSourceId &&
+      settings.wereadApiKey &&
       idMapping?.propertyName &&
       !getBookFieldMappingError(idMapping, settings.databaseProperties)
   );

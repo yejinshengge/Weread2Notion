@@ -53,16 +53,6 @@ export type SyncField =
   | "lastReadAt"
   | "wereadId";
 
-export type HighlightSyncField =
-  | "cover"
-  | "author"
-  | "url"
-  | "bookId"
-  | "noteCount"
-  | "bookmarkCount"
-  | "reviewCount"
-  | "lastSyncedAt";
-
 export type NotionPropertyType =
   | "title"
   | "rich_text"
@@ -93,11 +83,19 @@ export interface DatabasePropertyOption {
   color?: string;
 }
 
+export interface DatabaseStatusGroup {
+  id: string;
+  name: string;
+  optionIds: string[];
+  color?: string;
+}
+
 export interface DatabaseProperty {
   id: string;
   name: string;
   type: NotionPropertyType;
   options?: DatabasePropertyOption[];
+  statusGroups?: DatabaseStatusGroup[];
   relationDatabaseId?: string;
 }
 
@@ -119,20 +117,16 @@ export interface FieldMappingEntry<TSource extends string = string> {
 }
 
 export interface ExtensionSettings {
+  wereadApiKey: string;
   notionToken: string;
   databaseId: string;
+  dataSourceId: string;
   databaseUrl: string;
-  highlightDatabaseId: string;
-  highlightDatabaseUrl: string;
   fieldMappings: Array<FieldMappingEntry<SyncField>>;
-  highlightFieldMappings: Array<FieldMappingEntry<HighlightSyncField>>;
   mappings: FieldMappings;
   useNotionCover: boolean;
-  useHighlightNotionCover: boolean;
   databaseProperties: DatabaseProperty[];
-  highlightDatabaseProperties: DatabaseProperty[];
   lastValidatedAt?: string;
-  lastHighlightValidatedAt?: string;
 }
 
 export interface SyncSummary {
@@ -155,12 +149,6 @@ export interface CachedBookList {
   fetchedAt: string;
 }
 
-export interface CachedHighlightBookList {
-  books: WeReadNotebookBook[];
-  selectedBookId: string;
-  fetchedAt: string;
-}
-
 export interface NotionPageSearchResult {
   id: string;
   title: string;
@@ -168,13 +156,9 @@ export interface NotionPageSearchResult {
 
 export type BackgroundRequest =
   | { type: "FETCH_WEREAD_BOOKS" }
-  | { type: "FETCH_WEREAD_NOTEBOOKS" }
-  | { type: "FETCH_WEREAD_HIGHLIGHTS"; book: WeReadNotebookBook }
   | { type: "VALIDATE_NOTION"; token: string; databaseIdOrUrl: string }
-  | { type: "VALIDATE_HIGHLIGHT_NOTION"; token: string; databaseIdOrUrl: string }
   | { type: "SEARCH_NOTION_PAGES"; databaseId: string; query: string }
-  | { type: "SYNC_BOOKS"; books: WeReadBook[] }
-  | { type: "SYNC_BOOK_HIGHLIGHTS"; book: WeReadNotebookBook; notes: WeReadHighlightNote[] };
+  | { type: "SYNC_BOOKS"; books: WeReadBook[] };
 
 export type BackgroundResponse<T> =
   | { ok: true; data: T }
