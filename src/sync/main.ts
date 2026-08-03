@@ -14,11 +14,18 @@ interface SyncState {
   syncing: boolean;
   savingFields: boolean;
   fieldConfigOpen: boolean;
-  message: string;
-  error: string;
+  notice: SyncNotice | null;
+  noticeTimer: number | null;
   summary: SyncSummary | null;
   syncProgress: SyncProgress | null;
   cacheFetchedAt: string | null;
+}
+
+type SyncNoticeType = "success" | "error" | "info";
+
+interface SyncNotice {
+  type: SyncNoticeType;
+  message: string;
 }
 
 const state: SyncState = {
@@ -29,8 +36,8 @@ const state: SyncState = {
   syncing: false,
   savingFields: false,
   fieldConfigOpen: false,
-  message: "",
-  error: "",
+  notice: null,
+  noticeTimer: null,
   summary: null,
   syncProgress: null,
   cacheFetchedAt: null
@@ -44,13 +51,17 @@ void init();
 async function init(): Promise<void> {
   const [settings, cachedBookList] = await Promise.all([getSettings(), getCachedBookList()]);
   state.settings = settings;
+  let restoredMessage = "";
   if (cachedBookList) {
     state.books = sortBooksByLastReadAt(cachedBookList.books);
     state.selectedIds = new Set(cachedBookList.selectedIds);
     state.cacheFetchedAt = cachedBookList.fetchedAt;
-    state.message = `已恢复上次读取的 ${cachedBookList.books.length} 本书`;
+    restoredMessage = `已恢复上次读取的 ${cachedBookList.books.length} 本书`;
   }
   render();
+  if (restoredMessage) {
+    showNotice(restoredMessage, "info");
+  }
 }
 
 chrome.runtime.onMessage.addListener((message: { type?: string; progress?: SyncProgress }) => {
@@ -85,6 +96,8 @@ function render(): void {
 
   app.innerHTML = `
     <main class="sync-shell">
+      ${renderNotice()}
+
       <header class="topbar">
         <div>
           <h1>书籍与划线同步</h1>
@@ -135,22 +148,83 @@ async function refreshSettings(): Promise<void> {
 function renderStatus(configured: boolean): string {
   const mapping = getBookIdMapping();
   const idReady = Boolean(mapping?.propertyName && state.settings && !getBookFieldMappingError(mapping, state.settings.databaseProperties));
-  const items = [
-    state.settings?.wereadApiKey ? "微信读书 API 已配置" : "微信读书 API 未配置",
-    state.settings?.notionToken && state.settings.dataSourceId ? "Notion 已连接" : "Notion 未配置",
-    idReady ? `去重字段：${escapeHtml(mapping?.propertyName ?? "")}` : "缺少 WeRead ID 映射"
+  const cacheReady = state.books.length > 0;
+  const statusItems = [
+    {
+      label: "微信读书",
+      detail: state.settings?.wereadApiKey ? "API Key 已配置，可读取书架" : "需要配置 WEREAD_API_KEY",
+      ready: Boolean(state.settings?.wereadApiKey),
+      icon: "↗"
+    },
+    {
+      label: "Notion 数据库",
+      detail: state.settings?.notionToken && state.settings.dataSourceId ? "数据库已验证，可以写入" : "需要完成数据库连接与验证",
+      ready: Boolean(state.settings?.notionToken && state.settings.dataSourceId),
+      icon: "N"
+    },
+    {
+      label: "去重字段",
+      detail: idReady ? `已映射「${escapeHtml(mapping?.propertyName ?? "")}」` : "需要映射 WeRead ID，避免重复创建",
+      ready: idReady,
+      icon: "#"
+    },
+    {
+      label: "书架数据",
+      detail: cacheReady && state.cacheFetchedAt ? `最近读取 ${formatDate(state.cacheFetchedAt)}` : "尚未读取书架",
+      ready: cacheReady,
+      icon: "▤"
+    }
   ];
-  if (state.cacheFetchedAt && state.books.length > 0) {
-    items.push(`书架缓存：${formatDate(state.cacheFetchedAt)}`);
-  }
-  const className = configured ? "status ok" : "status warn";
 
   return `
-    <section class="${className}">
-      ${items.map((item) => `<span>${item}</span>`).join("")}
-      ${state.error ? `<strong>${escapeHtml(state.error)}</strong>` : ""}
-      ${state.message ? `<strong>${escapeHtml(state.message)}</strong>` : ""}
+    <section class="readiness-card">
+      <div class="readiness-heading">
+        <div>
+          <span class="eyebrow">同步前检查</span>
+          <h2>连接与同步准备</h2>
+          <p>完成这些准备后，就可以选择书籍并同步到 Notion。</p>
+        </div>
+        <span class="readiness-overall ${configured ? "ready" : "pending"}">
+          <span class="readiness-overall-dot" aria-hidden="true"></span>
+          ${configured ? "可以开始同步" : "还有待完成项"}
+        </span>
+      </div>
+      <div class="status-grid">
+        ${statusItems.map((item) => renderStatusItem(item.label, item.detail, item.ready, item.icon)).join("")}
+      </div>
     </section>
+  `;
+}
+
+function renderStatusItem(label: string, detail: string, ready: boolean, icon: string): string {
+  return `
+    <div class="status-item ${ready ? "ready" : "pending"}">
+      <span class="status-item-icon" aria-hidden="true">${icon}</span>
+      <div class="status-item-copy">
+        <div class="status-item-title">
+          <strong>${label}</strong>
+          <span class="status-chip">${ready ? "已就绪" : "待处理"}</span>
+        </div>
+        <small>${detail}</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderNotice(): string {
+  if (!state.notice) {
+    return "";
+  }
+
+  const role = state.notice.type === "error" ? "alert" : "status";
+  const live = state.notice.type === "error" ? "assertive" : "polite";
+  const icon = state.notice.type === "error" ? "!" : state.notice.type === "success" ? "✓" : "i";
+  return `
+    <div class="sync-toast ${state.notice.type}" role="${role}" aria-live="${live}">
+      <span class="sync-toast-icon" aria-hidden="true">${icon}</span>
+      <span class="sync-toast-message">${escapeHtml(state.notice.message)}</span>
+      <button class="sync-toast-close" id="dismiss-notice" type="button" aria-label="关闭提示">×</button>
+    </div>
   `;
 }
 
@@ -295,8 +369,11 @@ function renderBooks(): string {
                 <strong>${escapeHtml(book.title)}</strong>
                 <small>${escapeHtml([book.author, book.category].filter(Boolean).join(" · ") || "无作者/类别")}</small>
               </span>
-              <span class="progress">${book.progress}%</span>
-              <span class="badge">${book.status}</span>
+              <span class="book-progress">
+                <span class="book-progress-label">${book.progress}%</span>
+                <span class="book-progress-track" aria-hidden="true"><span style="width: ${Math.min(100, Math.max(0, book.progress))}%"></span></span>
+              </span>
+              <span class="badge status-${getBookStatusClass(book.status)}"><span class="badge-dot" aria-hidden="true"></span>${book.status}</span>
             </label>
           `
         )
@@ -342,30 +419,59 @@ function renderSyncProgress(): string {
     return "";
   }
 
-  const { completed, total, currentTitle, summary } = state.syncProgress;
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const detail = currentTitle
-    ? `正在同步：${currentTitle}`
-    : completed >= total
-      ? "正在收尾..."
-      : "准备同步...";
+  const {
+    completed,
+    total,
+    currentTitle,
+    stage = "writing",
+    highlightTotal = 0,
+    highlightCompleted = 0,
+    currentHighlight,
+    summary
+  } = state.syncProgress;
+  const highlightPercent = highlightTotal > 0
+    ? Math.round((Math.min(highlightCompleted, highlightTotal) / highlightTotal) * 100)
+    : stage === "writing"
+      ? 100
+      : 0;
+  const progressLabel = stage === "preparing"
+    ? "准备中..."
+    : stage === "readingHighlights"
+      ? "正在读取划线..."
+      : highlightTotal > 0
+        ? `${Math.min(highlightCompleted, highlightTotal)} / ${highlightTotal} 条划线 · ${highlightPercent}%`
+        : "无划线 · 已完成";
+  const currentBookTitle = currentTitle?.replace(/^正在写入 Notion：/, "");
+  const progressDetail = stage === "preparing"
+    ? currentTitle || "正在准备同步..."
+    : stage === "readingHighlights"
+      ? currentTitle || "正在读取划线..."
+      : currentHighlight
+        ? `正在写入划线：${currentHighlight}`
+        : currentBookTitle
+          ? `正在写入书籍信息：${currentBookTitle}`
+          : completed >= total
+            ? "正在收尾..."
+            : "准备写入下一本书...";
+  const isIndeterminate = stage === "preparing" || stage === "readingHighlights";
 
   return `
     <section class="sync-progress">
       <div class="progress-heading">
         <strong>${completed} / ${total}</strong>
-        <span>${percent}%</span>
+        <span>${progressLabel}</span>
       </div>
-      <div class="progress-track" aria-label="同步进度">
-        <span style="width: ${percent}%"></span>
+      <div class="sync-progress-track${isIndeterminate ? " is-indeterminate" : ""}" aria-label="划线同步进度">
+        <span style="width: ${highlightPercent}%"></span>
       </div>
-      <p>${escapeHtml(detail)}</p>
+      <p class="sync-progress-detail" title="${escapeAttribute(progressDetail)}">${escapeHtml(progressDetail)}</p>
       <small>新建 ${summary.created} · 更新 ${summary.updated} · 失败 ${summary.failed.length}</small>
     </section>
   `;
 }
 
 function bindEvents(): void {
+  document.querySelector("#dismiss-notice")?.addEventListener("click", () => dismissNotice());
   document.querySelector("#open-options")?.addEventListener("click", openOptionsPage);
   document.querySelector<HTMLDetailsElement>(".field-config")?.addEventListener("toggle", (event) => {
     state.fieldConfigOpen = (event.currentTarget as HTMLDetailsElement).open;
@@ -498,22 +604,21 @@ async function saveFieldConfig(): Promise<void> {
     Boolean(getBookFieldMappingError(entry, state.settings?.databaseProperties ?? []))
   );
   if (invalidEntry) {
-    state.error = getBookFieldMappingError(invalidEntry, state.settings.databaseProperties) ?? "字段配置有误";
+    const error = getBookFieldMappingError(invalidEntry, state.settings.databaseProperties) ?? "字段配置有误";
     state.fieldConfigOpen = true;
-    render();
+    showNotice(error, "error");
     return;
   }
 
   state.savingFields = true;
-  state.error = "";
-  state.message = "";
+  dismissNotice(false);
   render();
 
   try {
     await saveSettings(state.settings);
-    state.message = "书籍字段配置已保存";
+    showNotice("书籍字段配置已保存", "success");
   } catch (error) {
-    state.error = getErrorMessage(error);
+    showNotice(getErrorMessage(error), "error");
   } finally {
     state.savingFields = false;
     render();
@@ -522,8 +627,7 @@ async function saveFieldConfig(): Promise<void> {
 
 async function fetchBooks(): Promise<void> {
   state.loading = true;
-  state.error = "";
-  state.message = "";
+  dismissNotice(false);
   state.summary = null;
   render();
 
@@ -532,10 +636,11 @@ async function fetchBooks(): Promise<void> {
     state.books = sortBooksByLastReadAt(books);
     state.selectedIds = new Set(state.books.map((book) => book.bookId));
     state.cacheFetchedAt = new Date().toISOString();
-    state.message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
+    const message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
     await persistCurrentBookList();
+    showNotice(message, state.books.length > 0 ? "success" : "info");
   } catch (error) {
-    state.error = getErrorMessage(error);
+    showNotice(getErrorMessage(error), "error");
   } finally {
     state.loading = false;
     render();
@@ -545,21 +650,24 @@ async function fetchBooks(): Promise<void> {
 async function syncSelectedBooks(): Promise<void> {
   const selectedBooks = state.books.filter((book) => state.selectedIds.has(book.bookId));
   state.syncing = true;
-  state.error = "";
-  state.message = "";
+  dismissNotice(false);
   state.summary = null;
   state.syncProgress = {
     total: selectedBooks.length,
     completed: 0,
+    currentTitle: "正在启动同步...",
+    stage: "preparing",
+    highlightTotal: 0,
+    highlightCompleted: 0,
     summary: { created: 0, updated: 0, skipped: 0, failed: [] }
   };
   render();
 
   try {
     state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks });
-    state.message = "书籍与划线同步完成";
+    showNotice("书籍与划线同步完成", "success");
   } catch (error) {
-    state.error = getErrorMessage(error);
+    showNotice(getErrorMessage(error), "error");
   } finally {
     state.syncing = false;
     state.syncProgress = null;
@@ -636,4 +744,34 @@ function formatDate(value: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function showNotice(message: string, type: SyncNoticeType): void {
+  window.clearTimeout(state.noticeTimer ?? undefined);
+  state.notice = { message, type };
+  render();
+  state.noticeTimer = window.setTimeout(() => {
+    state.notice = null;
+    state.noticeTimer = null;
+    render();
+  }, type === "error" ? 6500 : 4200);
+}
+
+function dismissNotice(shouldRender = true): void {
+  window.clearTimeout(state.noticeTimer ?? undefined);
+  state.noticeTimer = null;
+  state.notice = null;
+  if (shouldRender) {
+    render();
+  }
+}
+
+function getBookStatusClass(status: WeReadBook["status"]): string {
+  if (status === "已读完") {
+    return "finished";
+  }
+  if (status === "阅读中") {
+    return "reading";
+  }
+  return "unstarted";
 }

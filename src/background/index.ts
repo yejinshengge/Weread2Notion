@@ -52,8 +52,26 @@ async function handleRequest(
     }
     case "SYNC_BOOKS": {
       const settings = await getSettings();
+      await publishSyncProgress({
+        total: request.books.length,
+        completed: 0,
+        currentTitle: "正在读取微信读书笔记本...",
+        stage: "preparing",
+        highlightTotal: 0,
+        highlightCompleted: 0,
+        summary: { created: 0, updated: 0, skipped: 0, failed: [] }
+      });
       const notebooks = await fetchWeReadNotebooks(settings.wereadApiKey);
       const notebookBookIds = new Set(notebooks.map((book) => book.bookId));
+      await publishSyncProgress({
+        total: request.books.length,
+        completed: 0,
+        currentTitle: "正在准备 Notion 配置...",
+        stage: "preparing",
+        highlightTotal: 0,
+        highlightCompleted: 0,
+        summary: { created: 0, updated: 0, skipped: 0, failed: [] }
+      });
       return syncBooksToNotion(settings, request.books, {
         onProgress: (progress) => publishSyncProgress(progress),
         getHighlights: (book) =>

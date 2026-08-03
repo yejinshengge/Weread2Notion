@@ -140,6 +140,10 @@ export interface SyncProgress {
   total: number;
   completed: number;
   currentTitle?: string;
+  stage?: "preparing" | "readingHighlights" | "writing";
+  highlightTotal?: number;
+  highlightCompleted?: number;
+  currentHighlight?: string;
   summary: SyncSummary;
 }
 
