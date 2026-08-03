@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WeRead to Notion",
   "description": "同步微信读书阅读记录到指定 Notion 数据库。",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "action": {
     "default_title": "打开书架同步"
   },

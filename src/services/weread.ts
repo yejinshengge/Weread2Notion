@@ -531,7 +531,24 @@ function compareNotes(first: WeReadHighlightNote, second: WeReadHighlightNote): 
   if (chapterDiff !== 0) {
     return chapterDiff;
   }
+
+  const rangeDiff = (getRangeStart(first.range) ?? Number.MAX_SAFE_INTEGER)
+    - (getRangeStart(second.range) ?? Number.MAX_SAFE_INTEGER);
+  if (rangeDiff !== 0) {
+    return rangeDiff;
+  }
+
   return (first.createTime ?? 0) - (second.createTime ?? 0);
+}
+
+function getRangeStart(range: string | undefined): number | undefined {
+  const start = range?.split("-", 1)[0];
+  if (!start) {
+    return undefined;
+  }
+
+  const value = Number(start);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function getReadingStatus(progress: number, finishReading: boolean, isStartReading = false): ReadingStatus {
