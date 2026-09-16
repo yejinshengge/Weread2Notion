@@ -39,6 +39,7 @@ interface NotionQueryResponse {
 interface NotionBlockResponse {
   id: string;
   type?: string;
+  [key: string]: unknown;
   toggle?: {
     rich_text?: Array<{ plain_text?: string; text?: { content?: string } }>;
   };
@@ -728,6 +729,39 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+// Compare rendered content, not Notion IDs, timestamps or rich-text response metadata.
+// Leave user formatting on unchanged text intact.
+function blockContentKey(block: NotionBlock | NotionBlockResponse): string {
+  const type = String(block.type);
+  const content = block[type] as { rich_text?: Parameters<typeof getBlockRichText>[0] } | undefined;
+  return JSON.stringify([type, getBlockRichText(content?.rich_text)]);
+}
+
+function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]): {
+  blocks: NotionBlock[];
+  noteEnds: number[];
+} {
+  if (notes.length === 0) return { blocks: [], noteEnds: [] };
+  const blocks = [
+    headingOneBlock(HIGHLIGHTS_TITLE),
+    paragraphBlock(`作者：${book.author || "未知"} · 划线 ${notes.filter((note) => note.original).length} · 想法 ${notes.filter((note) => note.thought).length}`),
+    paragraphBlock(`微信读书：${book.url}`),
+    dividerBlock()
+  ];
+  const noteEnds: number[] = [];
+  let currentChapter = "";
+  for (const note of notes) {
+    const chapterTitle = note.chapterTitle || "未分章节";
+    if (chapterTitle !== currentChapter) {
+      currentChapter = chapterTitle;
+      blocks.push(headingBlock(chapterTitle));
+    }
+    blocks.push(...buildNoteBlocks(note), dividerBlock());
+    noteEnds.push(blocks.length);
+  }
+  return { blocks, noteEnds };
+}
+
 async function replaceManagedHighlights(
   token: string,
   pageId: string,
@@ -737,19 +771,62 @@ async function replaceManagedHighlights(
 ): Promise<boolean> {
   const existingChildren = await listPageChildren(token, pageId);
   const managedBlocks = findManagedHighlightsBlocks(existingChildren);
+  const { blocks: desired } = buildManagedHighlights(book, notes);
+  const existingKeys = managedBlocks.map(blockContentKey);
+  const desiredKeys = desired.map(blockContentKey);
+  if (existingKeys.length === desiredKeys.length && existingKeys.every((key, i) => key === desiredKeys[i])) {
+    await onProgress?.({ total: notes.length, completed: notes.length });
+    return false;
+  }
 
-  for (const block of managedBlocks) {
+  const archive = async (block: NotionBlockResponse) => {
     await notionRequest(token, `/blocks/${block.id}`, {
       method: "PATCH",
       body: JSON.stringify({ archived: true })
     });
+  };
+  const headingCount = managedBlocks.filter((block) => block.type === "heading_1").length;
+  if (desired.length === 0) {
+    for (const block of managedBlocks) await archive(block);
+  } else if (headingCount !== 1 || managedBlocks.some((block) => block.type === "toggle")) {
+    // Legacy toggles / duplicate sections: write successfully before removing the old content.
+    await appendManagedHighlights(token, pageId, book, notes, onProgress);
+    for (const block of managedBlocks) await archive(block);
+  } else {
+    let prefix = 0;
+    while (prefix < existingKeys.length && prefix < desiredKeys.length && existingKeys[prefix] === desiredKeys[prefix]) prefix++;
+    let oldEnd = existingKeys.length;
+    let newEnd = desiredKeys.length;
+    while (oldEnd > prefix && newEnd > prefix && existingKeys[oldEnd - 1] === desiredKeys[newEnd - 1]) {
+      oldEnd--;
+      newEnd--;
+    }
+    // The matching section heading always provides an insertion anchor.
+    let after = managedBlocks[prefix - 1].id;
+    const paired = Math.min(oldEnd - prefix, newEnd - prefix);
+    for (let offset = 0; offset < paired; offset++) {
+      const index = prefix + offset;
+      const oldBlock = managedBlocks[index];
+      const newBlock = desired[index];
+      if (existingKeys[index] !== desiredKeys[index]) {
+        if (oldBlock.type === newBlock.type) {
+          await notionRequest(token, `/blocks/${oldBlock.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ [String(newBlock.type)]: newBlock[String(newBlock.type)] })
+          });
+        } else {
+          after = (await appendPageChildren(token, pageId, [newBlock], after))!;
+          await archive(oldBlock);
+          continue;
+        }
+      }
+      after = oldBlock.id;
+    }
+    // Insert before archiving so an append failure does not remove existing text.
+    await appendPageChildren(token, pageId, desired.slice(prefix + paired, newEnd), after);
+    for (const block of managedBlocks.slice(prefix + paired, oldEnd)) await archive(block);
   }
-
-  if (notes.length === 0) {
-    return managedBlocks.length > 0;
-  }
-
-  await appendManagedHighlights(token, pageId, book, notes, onProgress);
+  await onProgress?.({ total: notes.length, completed: notes.length });
   return true;
 }
 
@@ -760,36 +837,17 @@ async function appendManagedHighlights(
   notes: WeReadHighlightNote[],
   onProgress?: HighlightProgressHandler
 ): Promise<void> {
-  await appendPageChildren(token, pageId, [
-    headingOneBlock(HIGHLIGHTS_TITLE),
-    paragraphBlock(`作者：${book.author || "未知"} · 划线 ${notes.filter((note) => note.original).length} · 想法 ${notes.filter((note) => note.thought).length}`),
-    paragraphBlock(`微信读书：${book.url}`),
-    dividerBlock()
-  ]);
-
-  let currentChapter = "";
-  for (let index = 0; index < notes.length; index += 1) {
-    const note = notes[index];
+  const { blocks, noteEnds } = buildManagedHighlights(book, notes);
+  let completed = 0;
+  await onProgress?.({ total: notes.length, completed, currentHighlight: notes[0] && getHighlightProgressText(notes[0]) });
+  await appendPageChildren(token, pageId, blocks, undefined, async (written) => {
+    while (completed < noteEnds.length && noteEnds[completed] <= written) completed++;
     await onProgress?.({
       total: notes.length,
-      completed: index,
-      currentHighlight: getHighlightProgressText(note)
+      completed,
+      currentHighlight: notes[completed] && getHighlightProgressText(notes[completed])
     });
-
-    const chapterTitle = note.chapterTitle || "未分章节";
-    const children: NotionBlock[] = [];
-    if (chapterTitle !== currentChapter) {
-      currentChapter = chapterTitle;
-      children.push(headingBlock(chapterTitle));
-    }
-    children.push(...buildNoteBlocks(note), dividerBlock());
-    await appendPageChildren(token, pageId, children);
-
-    await onProgress?.({
-      total: notes.length,
-      completed: index + 1
-    });
-  }
+  });
 }
 
 function getHighlightProgressText(note: WeReadHighlightNote): string {
@@ -846,13 +904,33 @@ async function appendPageChildren(
   token: string,
   pageId: string,
   children: NotionBlock[],
-): Promise<void> {
-  for (let index = 0; index < children.length; index += NOTION_CHILDREN_BATCH_SIZE) {
-    await notionRequest(token, `/blocks/${pageId}/children`, {
+  after?: string,
+  onBatch?: (written: number) => Promise<void>
+): Promise<string | undefined> {
+  let index = 0;
+  const encoder = new TextEncoder();
+  while (index < children.length) {
+    const batch: NotionBlock[] = [];
+    let bytes = 0;
+    while (index + batch.length < children.length && batch.length < NOTION_CHILDREN_BATCH_SIZE) {
+      const child = children[index + batch.length];
+      const childBytes = encoder.encode(JSON.stringify(child)).length + 1;
+      // Keep headroom below Notion's 500 KB payload limit (including CJK text).
+      if (batch.length > 0 && bytes + childBytes > 450_000) break;
+      batch.push(child);
+      bytes += childBytes;
+    }
+    const response = await notionRequest<NotionBlockChildrenResponse>(token, `/blocks/${pageId}/children`, {
       method: "PATCH",
-      body: JSON.stringify({ children: children.slice(index, index + NOTION_CHILDREN_BATCH_SIZE) })
+      // `after` is supported by the pinned 2025-09-03 API version.
+      body: JSON.stringify({ children: batch, ...(after ? { after } : {}) })
     });
+    after = response.results[response.results.length - 1]?.id;
+    if (!after) throw new Error("Notion 未返回新增块 ID，请重新同步以核对内容");
+    index += batch.length;
+    await onBatch?.(index);
   }
+  return after;
 }
 
 async function listPageChildren(token: string, pageId: string): Promise<NotionBlockResponse[]> {
@@ -1137,7 +1215,8 @@ async function publishProgress(
 async function notionRequest<T>(
   token: string,
   path: string,
-  init: RequestInit
+  init: RequestInit,
+  rateLimitAttempt = 0
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
@@ -1148,6 +1227,13 @@ async function notionRequest<T>(
     ...init,
     headers
   });
+
+  if (response.status === 429 && rateLimitAttempt < 3) {
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    const delaySeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1;
+    await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    return notionRequest<T>(token, path, init, rateLimitAttempt + 1);
+  }
 
   if (!response.ok) {
     let message = `Notion 请求失败：${response.status}`;

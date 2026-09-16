@@ -1,9 +1,10 @@
 {
   "name": "weread2notion-extension",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node scripts/test-notion-sync.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"
