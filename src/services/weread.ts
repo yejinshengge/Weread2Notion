@@ -149,12 +149,13 @@ async function enrichBooksWithProgress(
       try {
         const payload = await fetchBookProgress(apiKey, book.bookId);
         const progressRecord = payload.book;
-        const progress = clampProgress(firstNumber(progressRecord?.progress, book.progress));
+        const finishReading = Boolean(progressRecord?.finishReading) || book.status === "已读完";
+        const progress = normalizeProgress(firstNumber(progressRecord?.progress, book.progress), finishReading);
         const started = Boolean(progressRecord?.isStartReading) || progress > 0;
         enrichedBooks[index] = {
           ...book,
           progress,
-          status: getReadingStatus(progress, book.status === "已读完", started),
+          status: getReadingStatus(progress, finishReading, started),
           startReadAt: options.includeStartReadAt
             ? unixSecondsToIso(progressRecord?.startReadingTime) ?? book.startReadAt
             : undefined,
@@ -240,8 +241,8 @@ function normalizeBook(book: BookLike): WeReadBook | null {
     return null;
   }
 
-  const progress = clampProgress(firstNumber(book.progress, book.readingProgress));
   const finishReading = Boolean(book.finishReading);
+  const progress = normalizeProgress(firstNumber(book.progress, book.readingProgress), finishReading);
   const status = getReadingStatus(progress, finishReading);
   const started = status !== "未开始";
 
@@ -569,6 +570,10 @@ function clampProgress(value: number): number {
     return Math.round(value * 100);
   }
   return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function normalizeProgress(value: number, finishReading: boolean): number {
+  return finishReading ? 100 : clampProgress(value);
 }
 
 function firstNumber(...values: Array<number | undefined>): number {
