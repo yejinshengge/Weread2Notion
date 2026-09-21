@@ -104,7 +104,14 @@ interface ChapterInfoLike {
   chapterUid?: string | number;
   chapterIdx?: number;
   title?: string;
+  level?: number;
   anchors?: ChapterInfoLike[];
+}
+
+interface ChapterLocation {
+  chapterIdx?: number;
+  chapterTitle: string;
+  subtitleTitle?: string;
 }
 
 interface ChapterInfosResponse extends WeReadGatewayResponse {
@@ -219,7 +226,7 @@ export async function fetchWeReadHighlights(apiKey: string, bookId: string): Pro
     }
   }
 
-  const chapters = chapterResult.status === "fulfilled" ? chapterResult.value : new Map<string, ChapterInfoLike>();
+  const chapters = chapterResult.status === "fulfilled" ? chapterResult.value : new Map<string, ChapterLocation>();
   const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
   const reviews = reviewResult.status === "fulfilled" ? reviewResult.value : [];
 
@@ -324,22 +331,49 @@ async function fetchReviewList(apiKey: string, bookId: string): Promise<ReviewLi
   return reviews;
 }
 
-async function fetchChapterInfo(apiKey: string, bookId: string): Promise<Map<string, ChapterInfoLike>> {
+async function fetchChapterInfo(apiKey: string, bookId: string): Promise<Map<string, ChapterLocation>> {
   const payload = await callWeReadGateway<ChapterInfosResponse>(apiKey, "/book/chapterinfo", { bookId });
-  const chapters = new Map<string, ChapterInfoLike>();
+  const chapters = new Map<string, ChapterLocation>();
+  const ancestors: Array<{ level: number; title: string }> = [];
   for (const item of payload.chapters ?? []) {
-    addChapter(chapters, item);
-    for (const anchor of item.anchors ?? []) {
-      addChapter(chapters, anchor);
+    const level = typeof item.level === "number" && Number.isInteger(item.level) && item.level >= 0
+      ? item.level
+      : undefined;
+    if (level === undefined) {
+      ancestors.length = 0;
+    } else {
+      while (ancestors.length && ancestors[ancestors.length - 1].level >= level) {
+        ancestors.pop();
+      }
+    }
+    addChapter(chapters, item, ancestors.map((ancestor) => ancestor.title));
+    const title = emptyToUndefined(item.title);
+    if (title && level !== undefined) {
+      ancestors.push({ level, title });
     }
   }
   return chapters;
 }
 
-function addChapter(chapters: Map<string, ChapterInfoLike>, chapter: ChapterInfoLike): void {
+function addChapter(
+  chapters: Map<string, ChapterLocation>,
+  chapter: ChapterInfoLike,
+  parentTitles: string[],
+  parentIdx?: number
+): void {
+  const title = emptyToUndefined(chapter.title);
+  const titles = title ? [...parentTitles, title] : parentTitles;
   const chapterUid = toStringValue(chapter.chapterUid);
-  if (chapterUid) {
-    chapters.set(chapterUid, chapter);
+  const chapterIdx = firstNumberOrUndefined(chapter.chapterIdx, parentIdx);
+  if (chapterUid && titles.length && !chapters.has(chapterUid)) {
+    chapters.set(chapterUid, {
+      chapterIdx,
+      chapterTitle: titles[0],
+      subtitleTitle: titles.length > 1 ? titles.slice(1).join(" / ") : undefined
+    });
+  }
+  for (const anchor of chapter.anchors ?? []) {
+    addChapter(chapters, anchor, titles, chapterIdx);
   }
 }
 
@@ -435,7 +469,7 @@ function mergeHighlightNotes(
   bookId: string,
   bookmarks: BookmarkLike[],
   reviews: ReviewLike[],
-  chapters: Map<string, ChapterInfoLike>
+  chapters: Map<string, ChapterLocation>
 ): WeReadHighlightNote[] {
   const notesByKey = new Map<string, WeReadHighlightNote>();
 
@@ -464,7 +498,7 @@ function mergeHighlightNotes(
 function buildBookmarkNote(
   bookId: string,
   bookmark: BookmarkLike,
-  chapters: Map<string, ChapterInfoLike>
+  chapters: Map<string, ChapterLocation>
 ): WeReadHighlightNote {
   const chapterUid = toStringValue(bookmark.chapterUid);
   const chapter = chapterUid ? chapters.get(chapterUid) : undefined;
@@ -474,7 +508,8 @@ function buildBookmarkNote(
     type: "bookmark",
     chapterUid: emptyToUndefined(chapterUid),
     chapterIdx: firstNumberOrUndefined(bookmark.chapterIdx, chapter?.chapterIdx),
-    chapterTitle: emptyToUndefined(bookmark.chapterTitle || chapter?.title),
+    chapterTitle: chapter?.chapterTitle ?? emptyToUndefined(bookmark.chapterTitle),
+    subtitleTitle: chapter?.subtitleTitle,
     original: bookmark.markText?.trim() ?? "",
     range: emptyToUndefined(bookmark.range),
     createTime: firstNumberOrUndefined(bookmark.createTime),
@@ -485,7 +520,7 @@ function buildBookmarkNote(
 function buildReviewNote(
   bookId: string,
   review: ReviewLike,
-  chapters: Map<string, ChapterInfoLike>
+  chapters: Map<string, ChapterLocation>
 ): WeReadHighlightNote {
   const chapterUid = toStringValue(review.chapterUid);
   const chapter = chapterUid ? chapters.get(chapterUid) : undefined;
@@ -496,7 +531,8 @@ function buildReviewNote(
     type: "review",
     chapterUid: emptyToUndefined(chapterUid),
     chapterIdx: firstNumberOrUndefined(review.chapterIdx, chapter?.chapterIdx),
-    chapterTitle: emptyToUndefined(review.chapterTitle || chapter?.title),
+    chapterTitle: chapter?.chapterTitle ?? emptyToUndefined(review.chapterTitle),
+    subtitleTitle: chapter?.subtitleTitle,
     original: review.abstract?.trim() ?? "",
     thought: emptyToUndefined(review.content),
     userName: emptyToUndefined(review.author?.name),

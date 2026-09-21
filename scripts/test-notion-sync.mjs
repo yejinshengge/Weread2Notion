@@ -113,3 +113,44 @@ assert.ok(!blocks.some((block) => block.id === "legacy"));
 assert.equal(blocks[0].id, "manual");
 assert.equal((await sync([note(1)])).length, 0);
 console.log("Legacy toggle migration preserves old content on failed writes");
+
+blocks = [];
+notes = [
+  { ...note("chapter-one"), original: "第一章正文" },
+  { ...note("section-one"), subtitleTitle: "第一节", original: "第一节划线" },
+  { ...note("chapter-body"), original: "第一章后续正文" },
+  { ...note("chapter-two"), chapterTitle: "第二章", subtitleTitle: "第二节", original: "第二章划线" }
+];
+await sync(notes);
+assert.deepEqual(
+  blocks.filter((block) => block.type === "heading_2" || block.type === "heading_3")
+    .map((block) => [block.type, block[block.type].rich_text[0].text.content]),
+  [
+    ["heading_2", "第一章"],
+    ["heading_3", "第一节"],
+    ["heading_3", "章节正文"],
+    ["heading_2", "第二章"],
+    ["heading_3", "第二节"]
+  ]
+);
+assert.equal((await sync(notes)).length, 0);
+console.log("Chapter and subtitle headings remain distinct across chapter changes");
+
+blocks = [];
+const oldNotes = [
+  { ...note("first"), original: "章节划线" },
+  { ...note("second"), chapterTitle: "第一节", original: "子标题划线" }
+];
+await sync(oldNotes);
+const correctedNotes = [
+  oldNotes[0],
+  { ...oldNotes[1], chapterTitle: "第一章", subtitleTitle: "第一节" }
+];
+await sync(correctedNotes);
+assert.deepEqual(
+  blocks.filter((block) => block.type === "heading_2" || block.type === "heading_3")
+    .map((block) => [block.type, block[block.type].rich_text[0].text.content]),
+  [["heading_2", "第一章"], ["heading_3", "第一节"]]
+);
+assert.deepEqual(content(), await expectedFor(correctedNotes));
+console.log("Resync replaces a subtitle-only heading with its chapter hierarchy");

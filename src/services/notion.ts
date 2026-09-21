@@ -686,11 +686,12 @@ function paragraphBlock(content: string): NotionBlock {
   };
 }
 
-function headingBlock(content: string): NotionBlock {
+function headingBlock(content: string, level: 2 | 3 = 2): NotionBlock {
+  const type = level === 2 ? "heading_2" : "heading_3";
   return {
     object: "block",
-    type: "heading_2",
-    heading_2: {
+    type,
+    [type]: {
       rich_text: [{ type: "text", text: { content: truncateText(content, 180) } }],
       color: "default",
       is_toggleable: false
@@ -750,11 +751,18 @@ function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]):
   ];
   const noteEnds: number[] = [];
   let currentChapter = "";
+  let currentSubtitle = "";
   for (const note of notes) {
     const chapterTitle = note.chapterTitle || "未分章节";
     if (chapterTitle !== currentChapter) {
       currentChapter = chapterTitle;
+      currentSubtitle = "";
       blocks.push(headingBlock(chapterTitle));
+    }
+    const subtitleTitle = note.subtitleTitle || "";
+    if (subtitleTitle !== currentSubtitle) {
+      currentSubtitle = subtitleTitle;
+      blocks.push(headingBlock(subtitleTitle || "章节正文", 3));
     }
     blocks.push(...buildNoteBlocks(note), dividerBlock());
     noteEnds.push(blocks.length);

@@ -34,6 +34,7 @@ export interface WeReadHighlightNote {
   chapterUid?: string;
   chapterIdx?: number;
   chapterTitle?: string;
+  subtitleTitle?: string;
   original: string;
   thought?: string;
   userName?: string;
