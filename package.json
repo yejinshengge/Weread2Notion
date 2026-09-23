@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scripts/test-weread-progress.mjs && node scripts/test-weread-chapters.mjs && node scripts/test-notion-sync.mjs",
+    "test": "node scripts/test-weread-progress.mjs && node scripts/test-weread-chapters.mjs && node scripts/test-notion-sync.mjs && node scripts/test-notion-template.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"

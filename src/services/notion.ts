@@ -30,6 +30,12 @@ interface NotionDataSourceResponse {
   properties: Record<string, NotionDatabasePropertyResponse>;
 }
 
+interface NotionDataSourceTemplatesResponse {
+  templates: Array<{ id: string; is_default: boolean }>;
+  has_more?: boolean;
+  next_cursor?: string | null;
+}
+
 interface NotionQueryResponse {
   results: Array<{ id: string; properties?: Record<string, NotionPagePropertyResponse> }>;
   has_more?: boolean;
@@ -128,6 +134,8 @@ type ReadingStatusOptionIds = Map<string, Partial<Record<WeReadBook["status"], s
 
 const HIGHLIGHTS_TITLE = "微信读书划线与想法";
 const LEGACY_MANAGED_HIGHLIGHTS_TITLE = "微信读书划线与想法（由 WeRead to Notion 管理）";
+const TEMPLATE_WAIT_TIMEOUT_MS = 30_000;
+const TEMPLATE_POLL_INTERVAL_MS = 500;
 
 export async function validateDatabase(token: string, databaseIdOrUrl: string): Promise<DatabaseValidationResult> {
   const databaseId = extractDatabaseId(databaseIdOrUrl);
@@ -217,6 +225,8 @@ export async function syncBooksToNotion(
 
   const syncContext = await prepareSyncContext(settings);
   const liveSettings = syncContext.settings;
+  let defaultTemplateId: string | null | undefined;
+  let defaultTemplateBlockCount: number | undefined;
   const highlightsByBook = new Map<string, WeReadHighlightNote[]>();
   const highlightErrors = new Map<string, string>();
   let highlightTotal = 0;
@@ -337,22 +347,42 @@ export async function syncBooksToNotion(
           summary.skipped += 1;
         }
       } else {
+        if (defaultTemplateId === undefined) {
+          defaultTemplateId = await findDefaultTemplateId(liveSettings.notionToken, liveSettings.dataSourceId);
+        }
+        if (defaultTemplateId && notes.length > 0 && defaultTemplateBlockCount === undefined) {
+          defaultTemplateBlockCount = (await listPageChildren(liveSettings.notionToken, defaultTemplateId)).length;
+        }
         const payload = buildPagePayload(liveSettings, book, syncContext.statusOptionIds);
         const createdPage = await notionRequest<NotionPageResponse>(liveSettings.notionToken, "/pages", {
           method: "POST",
           body: JSON.stringify({
             parent: { type: "data_source_id", data_source_id: liveSettings.dataSourceId },
+            ...(defaultTemplateId ? { template: { type: "default" } } : {}),
             ...payload
           })
         });
         if (notes.length > 0) {
-          await appendManagedHighlights(
-            liveSettings.notionToken,
-            createdPage.id,
-            book,
-            notes,
-            reportHighlightProgress
-          );
+          if (defaultTemplateId && defaultTemplateBlockCount) {
+            await waitForTemplateBlocks(liveSettings.notionToken, createdPage.id, defaultTemplateBlockCount);
+          }
+          if (defaultTemplateId) {
+            await replaceManagedHighlights(
+              liveSettings.notionToken,
+              createdPage.id,
+              book,
+              notes,
+              reportHighlightProgress
+            );
+          } else {
+            await appendManagedHighlights(
+              liveSettings.notionToken,
+              createdPage.id,
+              book,
+              notes,
+              reportHighlightProgress
+            );
+          }
         }
         summary.created += 1;
       }
@@ -591,6 +621,38 @@ async function findExistingPage(settings: ExtensionSettings, book: WeReadBook): 
   );
 
   return response.results[0]?.id ?? null;
+}
+
+async function findDefaultTemplateId(token: string, dataSourceId: string): Promise<string | null> {
+  let startCursor: string | undefined;
+
+  do {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (startCursor) query.set("start_cursor", startCursor);
+    const response = await notionRequest<NotionDataSourceTemplatesResponse>(
+      token,
+      `/data_sources/${dataSourceId}/templates?${query.toString()}`,
+      { method: "GET" }
+    );
+    const defaultTemplate = response.templates.find((template) => template.is_default);
+    if (defaultTemplate) return defaultTemplate.id;
+    startCursor = response.next_cursor ?? undefined;
+    if (!response.has_more) break;
+  } while (startCursor);
+
+  return null;
+}
+
+async function waitForTemplateBlocks(token: string, pageId: string, expectedBlockCount: number): Promise<void> {
+  const deadline = Date.now() + TEMPLATE_WAIT_TIMEOUT_MS;
+  while (true) {
+    const blocks = await listPageChildren(token, pageId);
+    if (blocks.length >= expectedBlockCount) return;
+    if (Date.now() >= deadline) {
+      throw new Error("Notion 默认模板尚未完成应用，页面已创建；请稍后重新同步划线");
+    }
+    await new Promise((resolve) => setTimeout(resolve, TEMPLATE_POLL_INTERVAL_MS));
+  }
 }
 
 function buildPagePayload(
