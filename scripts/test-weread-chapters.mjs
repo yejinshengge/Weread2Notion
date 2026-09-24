@@ -13,9 +13,11 @@ const { fetchWeReadHighlights } = await import(
 );
 
 const response = (body) => new Response(JSON.stringify(body));
+let failChapterInfo = false;
 globalThis.fetch = async (_url, init) => {
   const { api_name } = JSON.parse(init.body);
   if (api_name === "/book/chapterinfo") {
+    if (failChapterInfo) throw new Error("章节接口暂时不可用");
     return response({ chapters: [
       { chapterUid: 1, chapterIdx: 1, level: 1, title: "第一章" },
       { chapterUid: 11, chapterIdx: 2, level: 2, title: "第一节" },
@@ -44,7 +46,7 @@ globalThis.fetch = async (_url, init) => {
   throw new Error(`Unexpected API: ${api_name}`);
 };
 
-const notes = await fetchWeReadHighlights("wrk-test", "book");
+const notes = await fetchWeReadHighlights("wrk-test", "book", { bookmarkCount: 6, reviewCount: 1 });
 const location = (id) => {
   const { chapterTitle, subtitleTitle } = notes.find((note) => note.id === id);
   return [chapterTitle, subtitleTitle];
@@ -56,4 +58,10 @@ assert.deepEqual(location("anchor"), ["第二章", "章内子标题"]);
 assert.deepEqual(location("next"), ["第二章", undefined]);
 assert.deepEqual(location("fallback"), ["未知章节", undefined]);
 assert.deepEqual(location("thought"), ["第一章", "第一节"]);
+await assert.rejects(
+  fetchWeReadHighlights("wrk-test", "book", { bookmarkCount: 7, reviewCount: 1 }),
+  /笔记明细少于笔记本概览/
+);
+failChapterInfo = true;
+await assert.rejects(fetchWeReadHighlights("wrk-test", "book"), /章节接口暂时不可用/);
 console.log("Chapter hierarchy is preserved for chapter and anchor highlights");

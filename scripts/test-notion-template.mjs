@@ -19,6 +19,7 @@ const response = (body) => new Response(JSON.stringify(body), { status: 200 });
 async function runCase({ hasDefault, hasNotes }) {
   const requests = [];
   let pageBlocks = [];
+  const rootChildren = new Map();
   let pageReads = 0;
   let nextBlockId = 0;
 
@@ -50,7 +51,19 @@ async function runCase({ hasDefault, hasNotes }) {
     if (path === "/v1/blocks/page/children" && init.method === "PATCH") {
       assert.ok(!hasDefault || pageReads >= 2, "划线不能在模板内容出现前写入");
       const added = body.children.map((block) => ({ ...structuredClone(block), id: `new-${++nextBlockId}` }));
+      for (const block of added) {
+        if (block.type === "callout") rootChildren.set(block.id, []);
+      }
       pageBlocks.push(...added);
+      return response({ results: added });
+    }
+    const rootMatch = path.match(/^\/v1\/blocks\/(new-\d+)\/children$/);
+    if (rootMatch) {
+      const children = rootChildren.get(rootMatch[1]);
+      assert.ok(children, `Unknown root ${rootMatch[1]}`);
+      if (init.method === "GET") return response({ results: structuredClone(children), has_more: false });
+      const added = body.children.map((block) => ({ ...structuredClone(block), id: `new-${++nextBlockId}` }));
+      children.push(...added);
       return response({ results: added });
     }
     throw new Error(`Unexpected ${init.method} ${path}`);
@@ -70,8 +83,12 @@ async function runCase({ hasDefault, hasNotes }) {
     assert.deepEqual(pageBlocks.slice(0, 2), templateBlocks);
   }
   if (hasNotes) {
-    assert.ok(pageBlocks.some((block) => block.heading_1?.rich_text?.[0]?.text?.content === "微信读书划线与想法"));
-    assert.ok(pageBlocks.some((block) => block.quote?.rich_text?.[0]?.text?.content === note.original));
+    const root = pageBlocks.find((block) => block.callout?.rich_text?.[0]?.text?.content.startsWith("微信读书同步信息 · "));
+    assert.equal(root?.type, "callout");
+    assert.equal(root.callout.color, "default");
+    assert.equal(rootChildren.get(root.id)[0]?.heading_1?.rich_text?.[0]?.text?.content, "微信读书划线与想法（自动同步）");
+    assert.equal(rootChildren.get(root.id)[0]?.heading_1?.is_toggleable, false);
+    assert.ok(rootChildren.get(root.id).some((block) => block.quote?.rich_text?.[0]?.text?.content === note.original));
   } else {
     assert.equal(pageReads, 0);
   }

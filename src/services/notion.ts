@@ -46,6 +46,9 @@ interface NotionBlockResponse {
   id: string;
   type?: string;
   [key: string]: unknown;
+  callout?: {
+    rich_text?: Array<{ plain_text?: string; text?: { content?: string } }>;
+  };
   toggle?: {
     rich_text?: Array<{ plain_text?: string; text?: { content?: string } }>;
   };
@@ -133,7 +136,10 @@ type HighlightProgressHandler = (progress: HighlightWriteProgress) => void | Pro
 type ReadingStatusOptionIds = Map<string, Partial<Record<WeReadBook["status"], string>>>;
 
 const HIGHLIGHTS_TITLE = "微信读书划线与想法";
+const MANAGED_HIGHLIGHTS_TITLE = "微信读书划线与想法（自动同步）";
+const MANAGED_CALLOUT_PREFIX = "微信读书同步信息 · ";
 const LEGACY_MANAGED_HIGHLIGHTS_TITLE = "微信读书划线与想法（由 WeRead to Notion 管理）";
+const HIGHLIGHTS_VERIFY_DELAYS_MS = [0, 1_000, 2_000, 4_000];
 const TEMPLATE_WAIT_TIMEOUT_MS = 30_000;
 const TEMPLATE_POLL_INTERVAL_MS = 500;
 
@@ -366,23 +372,13 @@ export async function syncBooksToNotion(
           if (defaultTemplateId && defaultTemplateBlockCount) {
             await waitForTemplateBlocks(liveSettings.notionToken, createdPage.id, defaultTemplateBlockCount);
           }
-          if (defaultTemplateId) {
-            await replaceManagedHighlights(
-              liveSettings.notionToken,
-              createdPage.id,
-              book,
-              notes,
-              reportHighlightProgress
-            );
-          } else {
-            await appendManagedHighlights(
-              liveSettings.notionToken,
-              createdPage.id,
-              book,
-              notes,
-              reportHighlightProgress
-            );
-          }
+          await replaceManagedHighlights(
+            liveSettings.notionToken,
+            createdPage.id,
+            book,
+            notes,
+            reportHighlightProgress
+          );
         }
         summary.created += 1;
       }
@@ -792,12 +788,44 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
-// Compare rendered content, not Notion IDs, timestamps or rich-text response metadata.
-// Leave user formatting on unchanged text intact.
+// Verify visible type and text in order. Notion removes U+200B from saved text.
 function blockContentKey(block: NotionBlock | NotionBlockResponse): string {
   const type = String(block.type);
   const content = block[type] as { rich_text?: Parameters<typeof getBlockRichText>[0] } | undefined;
-  return JSON.stringify([type, getBlockRichText(content?.rich_text)]);
+  return JSON.stringify([type, getBlockRichText(content?.rich_text).replace(/\r\n?/g, "\n").replace(/\u200B/g, "")]);
+}
+
+function isEmptyParagraph(block: NotionBlockResponse): boolean {
+  if (block.type !== "paragraph" || block.has_children === true) return false;
+  const content = block.paragraph as { rich_text?: Parameters<typeof getBlockRichText>[0] } | undefined;
+  return getBlockRichText(content?.rich_text) === "";
+}
+
+function describeBlockKey(key: string | undefined): string {
+  if (!key) return "无";
+  const [type, content] = JSON.parse(key) as [string, string];
+  return `${type}${content ? `「${truncateText(content.replace(/\s+/g, " "), 30)}」` : ""}`;
+}
+
+async function verifyManagedHighlights(token: string, rootId: string, expected: NotionBlock[]): Promise<void> {
+  const expectedKeys = expected.map(blockContentKey);
+  let mismatch = "";
+  for (const delayMs of HIGHLIGHTS_VERIFY_DELAYS_MS) {
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const actual = await listPageChildren(token, rootId);
+    // Blank editor paragraphs do not represent highlights or headings.
+    const content = actual.filter((block) => !isEmptyParagraph(block));
+    const actualKeys = content.map(blockContentKey);
+    const firstDifference = expectedKeys.findIndex((key, index) => key !== actualKeys[index]);
+    if (firstDifference < 0 && actualKeys.length === expectedKeys.length) return;
+    const index = firstDifference < 0 ? expectedKeys.length : firstDifference;
+    mismatch = `预期 ${expectedKeys.length} 块，读取到 ${actualKeys.length} 块；第 ${index + 1} 块预期 ${describeBlockKey(expectedKeys[index])}，读取到 ${describeBlockKey(actualKeys[index])}`;
+  }
+  throw new Error(`Notion 新划线区已写入，但核对未通过（${mismatch}）；已有划线区未清理，请重新同步`);
+}
+
+function highlightSummary(book: WeReadBook, notes: WeReadHighlightNote[]): string {
+  return `作者：${book.author || "未知"} · 划线 ${notes.filter((note) => note.original).length} · 想法 ${notes.filter((note) => note.thought).length}`;
 }
 
 function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]): {
@@ -806,8 +834,7 @@ function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]):
 } {
   if (notes.length === 0) return { blocks: [], noteEnds: [] };
   const blocks = [
-    headingOneBlock(HIGHLIGHTS_TITLE),
-    paragraphBlock(`作者：${book.author || "未知"} · 划线 ${notes.filter((note) => note.original).length} · 想法 ${notes.filter((note) => note.thought).length}`),
+    headingOneBlock(MANAGED_HIGHLIGHTS_TITLE),
     paragraphBlock(`微信读书：${book.url}`),
     dividerBlock()
   ];
@@ -840,83 +867,44 @@ async function replaceManagedHighlights(
   onProgress?: HighlightProgressHandler
 ): Promise<boolean> {
   const existingChildren = await listPageChildren(token, pageId);
-  const managedBlocks = findManagedHighlightsBlocks(existingChildren);
-  const { blocks: desired } = buildManagedHighlights(book, notes);
-  const existingKeys = managedBlocks.map(blockContentKey);
-  const desiredKeys = desired.map(blockContentKey);
-  if (existingKeys.length === desiredKeys.length && existingKeys.every((key, i) => key === desiredKeys[i])) {
-    await onProgress?.({ total: notes.length, completed: notes.length });
-    return false;
+  const oldBlocks = findManagedHighlightsBlocks(existingChildren);
+  if (notes.length === 0) {
+    for (const block of oldBlocks) await archiveBlock(token, block.id);
+    await onProgress?.({ total: 0, completed: 0 });
+    return oldBlocks.length > 0;
   }
 
-  const archive = async (block: NotionBlockResponse) => {
-    await notionRequest(token, `/blocks/${block.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ archived: true })
-    });
-  };
-  const headingCount = managedBlocks.filter((block) => block.type === "heading_1").length;
-  if (desired.length === 0) {
-    for (const block of managedBlocks) await archive(block);
-  } else if (headingCount !== 1 || managedBlocks.some((block) => block.type === "toggle")) {
-    // Legacy toggles / duplicate sections: write successfully before removing the old content.
-    await appendManagedHighlights(token, pageId, book, notes, onProgress);
-    for (const block of managedBlocks) await archive(block);
-  } else {
-    let prefix = 0;
-    while (prefix < existingKeys.length && prefix < desiredKeys.length && existingKeys[prefix] === desiredKeys[prefix]) prefix++;
-    let oldEnd = existingKeys.length;
-    let newEnd = desiredKeys.length;
-    while (oldEnd > prefix && newEnd > prefix && existingKeys[oldEnd - 1] === desiredKeys[newEnd - 1]) {
-      oldEnd--;
-      newEnd--;
-    }
-    // The matching section heading always provides an insertion anchor.
-    let after = managedBlocks[prefix - 1].id;
-    const paired = Math.min(oldEnd - prefix, newEnd - prefix);
-    for (let offset = 0; offset < paired; offset++) {
-      const index = prefix + offset;
-      const oldBlock = managedBlocks[index];
-      const newBlock = desired[index];
-      if (existingKeys[index] !== desiredKeys[index]) {
-        if (oldBlock.type === newBlock.type) {
-          await notionRequest(token, `/blocks/${oldBlock.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ [String(newBlock.type)]: newBlock[String(newBlock.type)] })
-          });
-        } else {
-          after = (await appendPageChildren(token, pageId, [newBlock], after))!;
-          await archive(oldBlock);
-          continue;
-        }
-      }
-      after = oldBlock.id;
-    }
-    // Insert before archiving so an append failure does not remove existing text.
-    await appendPageChildren(token, pageId, desired.slice(prefix + paired, newEnd), after);
-    for (const block of managedBlocks.slice(prefix + paired, oldEnd)) await archive(block);
-  }
-  await onProgress?.({ total: notes.length, completed: notes.length });
-  return true;
-}
-
-async function appendManagedHighlights(
-  token: string,
-  pageId: string,
-  book: WeReadBook,
-  notes: WeReadHighlightNote[],
-  onProgress?: HighlightProgressHandler
-): Promise<void> {
   const { blocks, noteEnds } = buildManagedHighlights(book, notes);
+  const rootId = await appendPageChildren(
+    token,
+    pageId,
+    [managedHighlightsCallout(book, notes)],
+    oldBlocks.at(-1)?.id
+  );
+  if (!rootId) throw new Error("Notion 未返回划线区 ID，请重新同步");
   let completed = 0;
   await onProgress?.({ total: notes.length, completed, currentHighlight: notes[0] && getHighlightProgressText(notes[0]) });
-  await appendPageChildren(token, pageId, blocks, undefined, async (written) => {
+  await appendPageChildren(token, rootId, blocks, undefined, async (written) => {
     while (completed < noteEnds.length && noteEnds[completed] <= written) completed++;
     await onProgress?.({
       total: notes.length,
       completed,
       currentHighlight: notes[completed] && getHighlightProgressText(notes[completed])
     });
+  });
+  await verifyManagedHighlights(token, rootId, blocks);
+
+  // A failed run can leave a partial root. Retire every root seen before this run
+  // only after the new root's entire ordered content has been verified.
+  for (const block of oldBlocks) await archiveBlock(token, block.id);
+  await onProgress?.({ total: notes.length, completed: notes.length });
+  return true;
+}
+
+async function archiveBlock(token: string, blockId: string): Promise<void> {
+  await notionRequest(token, `/blocks/${blockId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true })
   });
 }
 
@@ -937,31 +925,40 @@ function headingOneBlock(content: string): NotionBlock {
   };
 }
 
-function findManagedHighlightsBlocks(blocks: NotionBlockResponse[]): NotionBlockResponse[] {
-  const managedBlocks = new Map<string, NotionBlockResponse>();
-
-  for (const block of blocks) {
-    if (block.type === "toggle" && getBlockRichText(block.toggle?.rich_text) === LEGACY_MANAGED_HIGHLIGHTS_TITLE) {
-      managedBlocks.set(block.id, block);
+function managedHighlightsCallout(book: WeReadBook, notes: WeReadHighlightNote[]): NotionBlock {
+  return {
+    object: "block",
+    type: "callout",
+    callout: {
+      rich_text: [{ type: "text", text: { content: MANAGED_CALLOUT_PREFIX + highlightSummary(book, notes) } }],
+      icon: { type: "emoji", emoji: "📖" },
+      color: "default"
     }
-  }
+  };
+}
 
+function findManagedHighlightsBlocks(blocks: NotionBlockResponse[]): NotionBlockResponse[] {
+  const managedBlocks: NotionBlockResponse[] = [];
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index];
-    if (block.type !== "heading_1" || getBlockRichText(block.heading_1?.rich_text) !== HIGHLIGHTS_TITLE) {
-      continue;
-    }
-    managedBlocks.set(block.id, block);
-    for (let childIndex = index + 1; childIndex < blocks.length; childIndex += 1) {
-      const child = blocks[childIndex];
-      if (child.type === "heading_1") {
-        break;
+    if (block.type === "callout" && (
+      getBlockRichText(block.callout?.rich_text) === MANAGED_HIGHLIGHTS_TITLE ||
+      getBlockRichText(block.callout?.rich_text).startsWith(MANAGED_CALLOUT_PREFIX)
+    )) {
+      managedBlocks.push(block);
+    } else if (block.type === "toggle" && getBlockRichText(block.toggle?.rich_text) === LEGACY_MANAGED_HIGHLIGHTS_TITLE) {
+      managedBlocks.push(block);
+    } else if (block.type === "heading_1" && getBlockRichText(block.heading_1?.rich_text) === MANAGED_HIGHLIGHTS_TITLE) {
+      managedBlocks.push(block);
+    } else if (block.type === "heading_1" && getBlockRichText(block.heading_1?.rich_text) === HIGHLIGHTS_TITLE) {
+      managedBlocks.push(block);
+      // The old layout kept its children as page-level siblings until the next H1.
+      while (index + 1 < blocks.length && blocks[index + 1].type !== "heading_1") {
+        managedBlocks.push(blocks[++index]);
       }
-      managedBlocks.set(child.id, child);
     }
   }
-
-  return [...managedBlocks.values()];
+  return managedBlocks;
 }
 
 function getBlockRichText(
@@ -972,12 +969,14 @@ function getBlockRichText(
 
 async function appendPageChildren(
   token: string,
-  pageId: string,
+  parentId: string,
   children: NotionBlock[],
   after?: string,
   onBatch?: (written: number) => Promise<void>
 ): Promise<string | undefined> {
   let index = 0;
+  const positionedInsert = Boolean(after);
+  let lastWrittenId: string | undefined;
   const encoder = new TextEncoder();
   while (index < children.length) {
     const batch: NotionBlock[] = [];
@@ -990,17 +989,21 @@ async function appendPageChildren(
       batch.push(child);
       bytes += childBytes;
     }
-    const response = await notionRequest<NotionBlockChildrenResponse>(token, `/blocks/${pageId}/children`, {
+    const response = await notionRequest<NotionBlockChildrenResponse>(token, `/blocks/${parentId}/children`, {
       method: "PATCH",
       // `after` is supported by the pinned 2025-09-03 API version.
       body: JSON.stringify({ children: batch, ...(after ? { after } : {}) })
     });
-    after = response.results[response.results.length - 1]?.id;
-    if (!after) throw new Error("Notion 未返回新增块 ID，请重新同步以核对内容");
+    const lastId = response.results[response.results.length - 1]?.id;
+    if (!lastId) throw new Error("Notion 未返回新增块 ID，请重新同步以核对内容");
+    lastWrittenId = lastId;
+    // A fresh root has no existing children. Let each batch append at its end;
+    // only position batches explicitly when inserting among page-level blocks.
+    if (positionedInsert) after = lastId;
     index += batch.length;
     await onBatch?.(index);
   }
-  return after;
+  return lastWrittenId ?? after;
 }
 
 async function listPageChildren(token: string, pageId: string): Promise<NotionBlockResponse[]> {

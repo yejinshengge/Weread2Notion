@@ -62,7 +62,7 @@ async function handleRequest(
         summary: { created: 0, updated: 0, skipped: 0, failed: [] }
       });
       const notebooks = await fetchWeReadNotebooks(settings.wereadApiKey);
-      const notebookBookIds = new Set(notebooks.map((book) => book.bookId));
+      const notebooksByBookId = new Map(notebooks.map((book) => [book.bookId, book]));
       await publishSyncProgress({
         total: request.books.length,
         completed: 0,
@@ -74,10 +74,12 @@ async function handleRequest(
       });
       return syncBooksToNotion(settings, request.books, {
         onProgress: (progress) => publishSyncProgress(progress),
-        getHighlights: (book) =>
-          notebookBookIds.has(book.bookId)
-            ? fetchWeReadHighlights(settings.wereadApiKey, book.bookId)
-            : Promise.resolve([])
+        getHighlights: (book) => {
+          const notebook = notebooksByBookId.get(book.bookId);
+          return notebook
+            ? fetchWeReadHighlights(settings.wereadApiKey, book.bookId, notebook)
+            : Promise.resolve([]);
+        }
       });
     }
   }

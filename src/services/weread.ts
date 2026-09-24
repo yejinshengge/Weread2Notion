@@ -213,7 +213,11 @@ export async function fetchWeReadNotebooks(apiKey: string): Promise<WeReadNotebo
     .sort((first, second) => (second.sort ?? 0) - (first.sort ?? 0));
 }
 
-export async function fetchWeReadHighlights(apiKey: string, bookId: string): Promise<WeReadHighlightNote[]> {
+export async function fetchWeReadHighlights(
+  apiKey: string,
+  bookId: string,
+  expectedCounts?: Pick<WeReadNotebookBook, "bookmarkCount" | "reviewCount">
+): Promise<WeReadHighlightNote[]> {
   const [chapterResult, bookmarkResult, reviewResult] = await Promise.allSettled([
     fetchChapterInfo(apiKey, bookId),
     fetchBookmarkList(apiKey, bookId),
@@ -226,19 +230,26 @@ export async function fetchWeReadHighlights(apiKey: string, bookId: string): Pro
     }
   }
 
-  const chapters = chapterResult.status === "fulfilled" ? chapterResult.value : new Map<string, ChapterLocation>();
-  const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
-  const reviews = reviewResult.status === "fulfilled" ? reviewResult.value : [];
-
-  if (bookmarkResult.status === "rejected" || reviewResult.status === "rejected") {
+  if (chapterResult.status === "rejected" || bookmarkResult.status === "rejected" || reviewResult.status === "rejected") {
     const reasons = [
+      chapterResult.status === "rejected" ? `章节：${getErrorMessage(chapterResult.reason)}` : "",
       bookmarkResult.status === "rejected" ? `划线：${getErrorMessage(bookmarkResult.reason)}` : "",
       reviewResult.status === "rejected" ? `想法：${getErrorMessage(reviewResult.reason)}` : ""
     ].filter(Boolean);
-    throw new Error(`读取划线或想法失败：${reasons.join("；")}`);
+    throw new Error(`读取章节、划线或想法失败：${reasons.join("；")}`);
   }
 
-  return mergeHighlightNotes(bookId, bookmarks, reviews, chapters);
+  if (expectedCounts && (
+    bookmarkResult.value.length < expectedCounts.bookmarkCount ||
+    reviewResult.value.length < expectedCounts.reviewCount
+  )) {
+    throw new Error(
+      `微信读书笔记明细少于笔记本概览：划线 ${bookmarkResult.value.length}/${expectedCounts.bookmarkCount}，` +
+      `想法 ${reviewResult.value.length}/${expectedCounts.reviewCount}；请稍后重试`
+    );
+  }
+
+  return mergeHighlightNotes(bookId, bookmarkResult.value, reviewResult.value, chapterResult.value);
 }
 
 function normalizeBook(book: BookLike): WeReadBook | null {
