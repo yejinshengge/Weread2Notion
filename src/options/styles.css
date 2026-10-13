@@ -79,46 +79,6 @@ body.embedded .hero {
   gap: 12px;
 }
 
-.notice {
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.notice.ok {
-  color: #1f5736;
-  background: #eaf6ed;
-}
-
-.notice.error {
-  color: #8c2b24;
-  background: #fee9e6;
-}
-
-.toast {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 10;
-  max-width: min(360px, calc(100vw - 48px));
-  padding: 12px 14px;
-  border-radius: 6px;
-  box-shadow: 0 10px 26px rgb(20 34 27 / 18%);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.toast.ok {
-  color: #ffffff;
-  background: #1f6b46;
-}
-
-.toast.error {
-  color: #ffffff;
-  background: #8c2b24;
-}
-
 .panel {
   margin-bottom: 16px;
   padding: 20px;

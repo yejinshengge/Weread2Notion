@@ -835,7 +835,7 @@ function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]):
   if (notes.length === 0) return { blocks: [], noteEnds: [] };
   const blocks = [
     headingOneBlock(MANAGED_HIGHLIGHTS_TITLE),
-    paragraphBlock(`微信读书：${book.url}`),
+    ...(book.url ? [paragraphBlock(`微信读书：${book.url}`)] : []),
     dividerBlock()
   ];
   const noteEnds: number[] = [];

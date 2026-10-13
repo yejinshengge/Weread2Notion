@@ -27,6 +27,7 @@ interface BookLike {
   finishReading?: boolean | number;
   readUpdateTime?: number;
   updateTime?: number;
+  readerLink?: string;
   deepLink?: string;
 }
 
@@ -119,10 +120,9 @@ interface ChapterInfosResponse extends WeReadGatewayResponse {
 }
 
 const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway";
-const WEREAD_SKILL_VERSION = "1.0.4";
+const WEREAD_SKILL_VERSION = "1.0.5";
 const WEREAD_PAGE_SIZE = 100;
 const PROGRESS_CONCURRENCY = 8;
-const READER_URL_PREFIX = "https://weread.qq.com/web/reader/";
 
 class WeReadUpgradeRequiredError extends Error {}
 
@@ -271,7 +271,7 @@ function normalizeBook(book: BookLike): WeReadBook | null {
     progress,
     author: emptyToUndefined(book.author),
     category: normalizeCategory(book),
-    url: emptyToUndefined(book.deepLink) ?? `${READER_URL_PREFIX}${bookId}`,
+    url: emptyToUndefined(book.readerLink) ?? emptyToUndefined(book.deepLink),
     status,
     lastReadAt: started ? unixSecondsToIso(firstNumberOrUndefined(book.readUpdateTime, book.updateTime)) : undefined
   };
@@ -294,7 +294,7 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
     title,
     cover: normalizeCover(book?.cover),
     author: emptyToUndefined(book?.author),
-    url: emptyToUndefined(book?.deepLink) ?? `${READER_URL_PREFIX}${bookId}`,
+    url: emptyToUndefined(book?.readerLink) ?? emptyToUndefined(book?.deepLink),
     noteCount: highlightCount + bookmarkCount + reviewCount,
     bookmarkCount: highlightCount,
     reviewCount,
@@ -424,7 +424,10 @@ async function callWeReadGateway<T extends WeReadGatewayResponse>(
 
   if (payload.upgrade_info) {
     const upgradeMessage = payload.upgrade_info.message?.trim() || "当前微信读书技能版本需要升级";
-    throw new WeReadUpgradeRequiredError(`微信读书接口已暂停：${upgradeMessage}`);
+    const upgradeUrl = emptyToUndefined(payload.upgrade_info.upgrade_url);
+    throw new WeReadUpgradeRequiredError(
+      `微信读书接口已暂停：${upgradeMessage}${upgradeUrl ? `（升级地址：${upgradeUrl}）` : ""}`
+    );
   }
 
   if (!response.ok || (typeof payload.errcode === "number" && payload.errcode !== 0)) {

@@ -1,5 +1,6 @@
 import "./styles.css";
 import { sendBackgroundMessage } from "../shared/runtime";
+import { dismissTips, showTips } from "../shared/tips";
 import type { ExtensionSettings } from "../shared/types";
 import { getSettings, saveSettings } from "../storage";
 import { getTitleProperty } from "../services/notion";
@@ -8,26 +9,16 @@ interface OptionsState {
   settings: ExtensionSettings | null;
   saving: boolean;
   validating: boolean;
-  message: string;
-  error: string;
-  toast: {
-    type: "ok" | "error";
-    message: string;
-  } | null;
 }
 
 const state: OptionsState = {
   settings: null,
   saving: false,
-  validating: false,
-  message: "",
-  error: "",
-  toast: null
+  validating: false
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const NOTION_INTEGRATIONS_URL = "https://www.notion.so/my-integrations";
-let toastTimer: number | undefined;
 document.body.classList.toggle("embedded", window.parent !== window);
 
 void init();
@@ -58,8 +49,6 @@ function render(): void {
           <button class="secondary-link" id="open-sync-page" type="button">打开书籍同步</button>
         </div>
       </header>
-
-      ${renderMessage()}
 
       <section class="panel">
         <h2>微信读书连接</h2>
@@ -103,34 +92,10 @@ function render(): void {
           ${state.saving ? "保存中..." : "保存设置"}
         </button>
       </footer>
-
-      ${renderToast()}
     </main>
   `;
 
   bindEvents();
-}
-
-function renderMessage(): string {
-  if (state.error) {
-    return `<section class="notice error">${escapeHtml(state.error)}</section>`;
-  }
-  if (state.message) {
-    return `<section class="notice ok">${escapeHtml(state.message)}</section>`;
-  }
-  return "";
-}
-
-function renderToast(): string {
-  if (!state.toast) {
-    return "";
-  }
-
-  return `
-    <div class="toast ${state.toast.type}" role="status" aria-live="polite">
-      ${escapeHtml(state.toast.message)}
-    </div>
-  `;
 }
 
 function bindEvents(): void {
@@ -162,8 +127,7 @@ async function validateDatabaseFromForm(): Promise<void> {
     };
   }
   state.validating = true;
-  state.message = "";
-  state.error = "";
+  dismissTips();
   render();
 
   try {
@@ -172,9 +136,9 @@ async function validateDatabaseFromForm(): Promise<void> {
       ...(await getSettings()),
       wereadApiKey
     };
-    state.message = "Notion 数据库验证成功";
+    showTips("Notion 数据库验证成功", "success");
   } catch (error) {
-    state.error = getErrorMessage(error);
+    showTips(getErrorMessage(error), "error");
   } finally {
     state.validating = false;
     render();
@@ -195,32 +159,19 @@ async function saveSettingsFromForm(): Promise<void> {
 
   state.settings = nextSettings;
   state.saving = true;
-  state.message = "";
-  state.error = "";
+  dismissTips();
   render();
 
   try {
     await saveSettings(nextSettings);
     state.settings = nextSettings;
-    state.message = "设置已保存";
-    showToast("设置已保存", "ok");
+    showTips("设置已保存", "success");
   } catch (error) {
-    state.error = getErrorMessage(error);
-    showToast(state.error, "error");
+    showTips(getErrorMessage(error), "error");
   } finally {
     state.saving = false;
     render();
   }
-}
-
-function showToast(message: string, type: "ok" | "error"): void {
-  state.toast = { message, type };
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => {
-    state.toast = null;
-    render();
-  }, 2600);
-  render();
 }
 
 function readInputValue(selector: string): string {

@@ -262,6 +262,14 @@ assert.equal(pageBlocks.at(-1).id, "manual");
 assert.ok(!findBlock("old-heading") && !findBlock("old-quote") && !findBlock("old-divider"));
 console.log("The old flat section is retired after the first successful Callout write");
 
+const savedBookUrl = book.url;
+delete book.url;
+await sync([note("without-url")]);
+assert.ok(!roots()[0].children.some((block) => textOf(block).startsWith("微信读书：")));
+assert.deepEqual(roots()[0].children.filter((block) => block.type === "quote").map(textOf), ["划线 without-url"]);
+book.url = savedBookUrl;
+console.log("Books without an API-provided URL still sync highlights without a missing or fabricated link");
+
 pageBlocks = [];
 notes = Array.from({ length: 100 }, (_, i) => ({ ...note(i), original: "中".repeat(4000), thought: "文".repeat(4000) }));
 writes = (await sync(notes)).filter((request) => request.path.endsWith("/children") && request.method === "PATCH");

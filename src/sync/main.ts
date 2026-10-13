@@ -2,6 +2,7 @@ import "./styles.css";
 import { FIELD_LABELS, SYNC_FIELDS, getBookAllowedTypes, isWritablePropertyType } from "../shared/fields";
 import { bindCustomValueControls, renderCustomValueControl } from "../shared/customFields";
 import { openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
+import { dismissTips, showTips } from "../shared/tips";
 import type { DatabaseProperty, ExtensionSettings, FieldMappingEntry, SyncField, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
 import { getCachedBookList, getSettings, saveCachedBookList, saveSettings } from "../storage";
 import { getBookFieldMappingError, getTitleProperty } from "../services/notion";
@@ -14,18 +15,9 @@ interface SyncState {
   syncing: boolean;
   savingFields: boolean;
   fieldConfigOpen: boolean;
-  notice: SyncNotice | null;
-  noticeTimer: number | null;
   summary: SyncSummary | null;
   syncProgress: SyncProgress | null;
   cacheFetchedAt: string | null;
-}
-
-type SyncNoticeType = "success" | "error" | "info";
-
-interface SyncNotice {
-  type: SyncNoticeType;
-  message: string;
 }
 
 const state: SyncState = {
@@ -36,8 +28,6 @@ const state: SyncState = {
   syncing: false,
   savingFields: false,
   fieldConfigOpen: false,
-  notice: null,
-  noticeTimer: null,
   summary: null,
   syncProgress: null,
   cacheFetchedAt: null
@@ -60,7 +50,7 @@ async function init(): Promise<void> {
   }
   render();
   if (restoredMessage) {
-    showNotice(restoredMessage, "info");
+    showTips(restoredMessage, "info");
   }
 }
 
@@ -96,8 +86,6 @@ function render(): void {
 
   app.innerHTML = `
     <main class="sync-shell">
-      ${renderNotice()}
-
       <header class="topbar">
         <div>
           <h1>书籍与划线同步</h1>
@@ -207,23 +195,6 @@ function renderStatusItem(label: string, detail: string, ready: boolean, icon: s
         </div>
         <small>${detail}</small>
       </div>
-    </div>
-  `;
-}
-
-function renderNotice(): string {
-  if (!state.notice) {
-    return "";
-  }
-
-  const role = state.notice.type === "error" ? "alert" : "status";
-  const live = state.notice.type === "error" ? "assertive" : "polite";
-  const icon = state.notice.type === "error" ? "!" : state.notice.type === "success" ? "✓" : "i";
-  return `
-    <div class="sync-toast ${state.notice.type}" role="${role}" aria-live="${live}">
-      <span class="sync-toast-icon" aria-hidden="true">${icon}</span>
-      <span class="sync-toast-message">${escapeHtml(state.notice.message)}</span>
-      <button class="sync-toast-close" id="dismiss-notice" type="button" aria-label="关闭提示">×</button>
     </div>
   `;
 }
@@ -471,7 +442,6 @@ function renderSyncProgress(): string {
 }
 
 function bindEvents(): void {
-  document.querySelector("#dismiss-notice")?.addEventListener("click", () => dismissNotice());
   document.querySelector("#open-options")?.addEventListener("click", openOptionsPage);
   document.querySelector<HTMLDetailsElement>(".field-config")?.addEventListener("toggle", (event) => {
     state.fieldConfigOpen = (event.currentTarget as HTMLDetailsElement).open;
@@ -606,19 +576,20 @@ async function saveFieldConfig(): Promise<void> {
   if (invalidEntry) {
     const error = getBookFieldMappingError(invalidEntry, state.settings.databaseProperties) ?? "字段配置有误";
     state.fieldConfigOpen = true;
-    showNotice(error, "error");
+    render();
+    showTips(error, "error");
     return;
   }
 
   state.savingFields = true;
-  dismissNotice(false);
+  dismissTips();
   render();
 
   try {
     await saveSettings(state.settings);
-    showNotice("书籍字段配置已保存", "success");
+    showTips("书籍字段配置已保存", "success");
   } catch (error) {
-    showNotice(getErrorMessage(error), "error");
+    showTips(getErrorMessage(error), "error");
   } finally {
     state.savingFields = false;
     render();
@@ -627,7 +598,7 @@ async function saveFieldConfig(): Promise<void> {
 
 async function fetchBooks(): Promise<void> {
   state.loading = true;
-  dismissNotice(false);
+  dismissTips();
   state.summary = null;
   render();
 
@@ -638,9 +609,9 @@ async function fetchBooks(): Promise<void> {
     state.cacheFetchedAt = new Date().toISOString();
     const message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
     await persistCurrentBookList();
-    showNotice(message, state.books.length > 0 ? "success" : "info");
+    showTips(message, state.books.length > 0 ? "success" : "info");
   } catch (error) {
-    showNotice(getErrorMessage(error), "error");
+    showTips(getErrorMessage(error), "error");
   } finally {
     state.loading = false;
     render();
@@ -650,7 +621,7 @@ async function fetchBooks(): Promise<void> {
 async function syncSelectedBooks(): Promise<void> {
   const selectedBooks = state.books.filter((book) => state.selectedIds.has(book.bookId));
   state.syncing = true;
-  dismissNotice(false);
+  dismissTips();
   state.summary = null;
   state.syncProgress = {
     total: selectedBooks.length,
@@ -665,9 +636,9 @@ async function syncSelectedBooks(): Promise<void> {
 
   try {
     state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks });
-    showNotice("书籍与划线同步完成", "success");
+    showTips("书籍与划线同步完成", "success");
   } catch (error) {
-    showNotice(getErrorMessage(error), "error");
+    showTips(getErrorMessage(error), "error");
   } finally {
     state.syncing = false;
     state.syncProgress = null;
@@ -744,26 +715,6 @@ function formatDate(value: string): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
-}
-
-function showNotice(message: string, type: SyncNoticeType): void {
-  window.clearTimeout(state.noticeTimer ?? undefined);
-  state.notice = { message, type };
-  render();
-  state.noticeTimer = window.setTimeout(() => {
-    state.notice = null;
-    state.noticeTimer = null;
-    render();
-  }, type === "error" ? 6500 : 4200);
-}
-
-function dismissNotice(shouldRender = true): void {
-  window.clearTimeout(state.noticeTimer ?? undefined);
-  state.noticeTimer = null;
-  state.notice = null;
-  if (shouldRender) {
-    render();
-  }
 }
 
 function getBookStatusClass(status: WeReadBook["status"]): string {

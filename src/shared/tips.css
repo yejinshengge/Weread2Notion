@@ -1,0 +1,111 @@
+.tips {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  min-height: 46px;
+  padding: 9px 12px 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: 0 14px 32px rgb(22 32 27 / 18%);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translate(-50%, -8px);
+  animation: tips-in 180ms ease-out forwards;
+}
+
+.tips.success {
+  color: #1d5735;
+  border-color: #c7e4ce;
+  background: #f0faf2;
+}
+
+.tips.error {
+  color: #8c2b24;
+  border-color: #f0c8c2;
+  background: #fff4f2;
+}
+
+.tips.info {
+  color: #315b68;
+  border-color: #c9e1e6;
+  background: #f0fafc;
+}
+
+.tips-icon {
+  display: inline-grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tips.success .tips-icon {
+  background: #23814b;
+}
+
+.tips.error .tips-icon {
+  background: #b44136;
+}
+
+.tips.info .tips-icon {
+  background: #3b8090;
+}
+
+.tips-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: calc(100vh - 52px);
+  max-height: calc(100dvh - 52px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  line-height: 25px;
+}
+
+.tips-close {
+  display: inline-grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  place-items: center;
+  color: currentColor;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0.65;
+}
+
+.tips-close:hover {
+  opacity: 1;
+  background: rgb(22 32 27 / 7%);
+}
+
+.tips-close:focus-visible,
+.tips-message:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@keyframes tips-in {
+  to {
+    transform: translate(-50%, 0);
+  }
+}

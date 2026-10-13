@@ -2,6 +2,16 @@
 
 Chrome Manifest V3 插件，用于把微信读书书架、阅读进度、划线和想法同步到 Notion 数据库。
 
+## 演示
+
+### 书籍同步
+
+![书籍同步页面：同步前检查、字段配置与书架列表](docs/images/book-sync.png)
+
+### 配置页
+
+![配置页面：微信读书与 Notion 连接设置](docs/images/settings.png)
+
 ## 功能
 
 - 通过微信读书 Agent API Gateway 和个人 API Key 读取数据。
@@ -60,4 +70,6 @@ npm run build
 
 ## 说明
 
-微信读书读取统一通过 `POST https://i.weread.qq.com/api/agent/gateway` 完成。每次请求都会携带 `skill_version`，业务参数与 `api_name` 同层传递；API Key 仅保存在扩展的本地存储中。
+微信读书读取统一通过 `POST https://i.weread.qq.com/api/agent/gateway` 完成。当前适配官方 Skill `1.0.5`，每次请求都会携带 `skill_version`，业务参数与 `api_name` 同层传递；API Key 仅保存在扩展的本地存储中。
+
+书籍 URL 优先使用接口返回的 `readerLink`（阅读器链接），没有时使用 `deepLink`（书籍详情链接）；两个字段均缺失时省略 URL。接口返回 `upgrade_info` 时会停止读取，并显示升级提示及下载地址。

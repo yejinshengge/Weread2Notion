@@ -7,7 +7,7 @@ export interface WeReadBook {
   progress: number;
   author?: string;
   category?: string;
-  url: string;
+  url?: string;
   status: ReadingStatus;
   startReadAt?: string;
   lastReadAt?: string;
@@ -18,7 +18,7 @@ export interface WeReadNotebookBook {
   title: string;
   author?: string;
   cover?: string;
-  url: string;
+  url?: string;
   noteCount: number;
   bookmarkCount: number;
   reviewCount: number;
