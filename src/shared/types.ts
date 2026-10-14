@@ -159,12 +159,35 @@ export interface NotionPageSearchResult {
   title: string;
 }
 
+export interface NotionPageConnection {
+  pageId: string;
+  pageTitle: string;
+  pageUrl: string;
+}
+
+export interface ProcessOnEmbedInput {
+  pageId: string;
+  embedUrl: string;
+  title?: string;
+  position?: "start" | "end";
+}
+
+export interface ProcessOnEmbedResult {
+  created: boolean;
+  pageTitle: string;
+  pageId: string;
+  blockId: string;
+  url: string;
+}
+
 export type BackgroundRequest =
   | { type: "FETCH_WEREAD_BOOKS" }
   | { type: "VALIDATE_NOTION"; token: string; databaseIdOrUrl: string }
   | { type: "SEARCH_NOTION_PAGES"; databaseId: string; query: string }
+  | { type: "CHECK_NOTION_PAGE"; pageId: string }
+  | { type: "EMBED_PROCESSON"; input: ProcessOnEmbedInput }
   | { type: "SYNC_BOOKS"; books: WeReadBook[] };
 
 export type BackgroundResponse<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string };
+  | { ok: false; error: string; field?: string; code?: string; uncertain?: boolean };

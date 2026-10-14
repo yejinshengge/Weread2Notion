@@ -16,7 +16,8 @@ button {
 
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   flex-direction: column;
 }
 
@@ -78,12 +79,15 @@ button {
 .tab-panels {
   display: grid;
   flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .tab-panel {
   grid-area: 1 / 1;
   width: 100%;
-  height: calc(100vh - 82px);
+  height: 100%;
+  min-height: 0;
   border: 0;
   visibility: hidden;
 }
@@ -108,7 +112,4 @@ button {
     min-width: 0;
   }
 
-  .tab-panel {
-    height: calc(100vh - 128px);
-  }
 }

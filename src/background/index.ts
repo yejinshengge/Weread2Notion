@@ -2,24 +2,47 @@ import { getSettings, saveSettings } from "../storage";
 import type {
   BackgroundRequest,
   BackgroundResponse,
+  ProcessOnEmbedResult,
   SyncProgress,
   SyncSummary,
   WeReadBook
 } from "../shared/types";
 import { searchDatabasePages, syncBooksToNotion, validateDatabase } from "../services/notion";
 import { fetchWeReadBooks, fetchWeReadHighlights, fetchWeReadNotebooks } from "../services/weread";
+import { checkNotionPage, embedGraph, normalizeProcessOn, parseNotionPage, ToolError } from "../services/processon";
+
+const pendingEmbeds = new Map<string, Promise<ProcessOnEmbedResult>>();
+const handledRequestTypes = {
+  FETCH_WEREAD_BOOKS: true,
+  VALIDATE_NOTION: true,
+  SEARCH_NOTION_PAGES: true,
+  CHECK_NOTION_PAGE: true,
+  EMBED_PROCESSON: true,
+  SYNC_BOOKS: true
+} satisfies Record<BackgroundRequest["type"], true>;
 
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("sync.html") });
 });
 
-chrome.runtime.onMessage.addListener((request: BackgroundRequest, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request: unknown, _sender, sendResponse) => {
+  if (!isBackgroundRequest(request)) return false;
+
   handleRequest(request)
     .then((data) => sendResponse({ ok: true, data } satisfies BackgroundResponse<unknown>))
-    .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) } satisfies BackgroundResponse<unknown>));
+    .catch((error) => sendResponse({
+      ok: false,
+      error: getErrorMessage(error),
+      ...(error instanceof ToolError ? { field: error.field, code: error.code, uncertain: error.uncertain } : {})
+    } satisfies BackgroundResponse<unknown>));
 
   return true;
 });
+
+function isBackgroundRequest(request: unknown): request is BackgroundRequest {
+  return Boolean(request) && typeof request === "object" && request !== null &&
+    "type" in request && typeof request.type === "string" && Object.hasOwn(handledRequestTypes, request.type);
+}
 
 async function handleRequest(
   request: BackgroundRequest
@@ -49,6 +72,25 @@ async function handleRequest(
         throw new Error("请先完成 Notion 设置");
       }
       return searchDatabasePages(settings.notionToken, request.databaseId, request.query);
+    }
+    case "CHECK_NOTION_PAGE": {
+      const settings = await getSettings();
+      return checkNotionPage(settings.notionToken, request.pageId);
+    }
+    case "EMBED_PROCESSON": {
+      const settings = await getSettings();
+      const pageId = parseNotionPage(request.input.pageId);
+      const embedUrl = normalizeProcessOn(request.input.embedUrl);
+      const key = `${pageId}:${embedUrl}`;
+      const pending = pendingEmbeds.get(key);
+      if (pending) return pending;
+      const job = embedGraph({ ...request.input, token: settings.notionToken, pageId, embedUrl });
+      pendingEmbeds.set(key, job);
+      try {
+        return await job;
+      } finally {
+        pendingEmbeds.delete(key);
+      }
     }
     case "SYNC_BOOKS": {
       const settings = await getSettings();

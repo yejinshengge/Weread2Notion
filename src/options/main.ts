@@ -61,6 +61,7 @@ function render(): void {
 
       <section class="panel">
         <h2>Notion 连接</h2>
+        <p class="hint">书籍同步与图表嵌入共用此密钥。只嵌入图表时，保存密钥即可，无需填写或验证数据库。</p>
         <div class="field">
           <div class="field-heading">
             <label for="notion-token">内部集成密钥</label>
