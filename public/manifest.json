@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WeRead to Notion",
   "description": "同步微信读书阅读记录到 Notion，并将 ProcessOn 在线图表嵌入指定页面。",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "action": {
     "default_title": "打开书架同步"
   },
