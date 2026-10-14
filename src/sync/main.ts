@@ -6,11 +6,14 @@ import { dismissTips, showTips } from "../shared/tips";
 import type { DatabaseProperty, ExtensionSettings, FieldMappingEntry, SyncField, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
 import { getCachedBookList, getSettings, saveCachedBookList, saveSettings } from "../storage";
 import { getBookFieldMappingError, getTitleProperty } from "../services/notion";
+import { BOOK_SORT_DIRECTIONS, BOOK_SORT_FIELDS, getVisibleBooks, type BookSort } from "./bookList";
 
 interface SyncState {
   settings: ExtensionSettings | null;
   books: WeReadBook[];
   selectedIds: Set<string>;
+  searchQuery: string;
+  bookSort: BookSort;
   loading: boolean;
   syncing: boolean;
   savingFields: boolean;
@@ -24,6 +27,8 @@ const state: SyncState = {
   settings: null,
   books: [],
   selectedIds: new Set(),
+  searchQuery: "",
+  bookSort: "lastReadAt-desc",
   loading: false,
   syncing: false,
   savingFields: false,
@@ -43,7 +48,7 @@ async function init(): Promise<void> {
   state.settings = settings;
   let restoredMessage = "";
   if (cachedBookList) {
-    state.books = sortBooksByLastReadAt(cachedBookList.books);
+    state.books = getVisibleBooks(cachedBookList.books);
     state.selectedIds = new Set(cachedBookList.selectedIds);
     state.cacheFetchedAt = cachedBookList.fetchedAt;
     restoredMessage = `已恢复上次读取的 ${cachedBookList.books.length} 本书`;
@@ -73,12 +78,33 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   void refreshSettings();
 });
 
+document.addEventListener("click", (event) => {
+  const dropdown = app?.querySelector<HTMLDetailsElement>("#book-sort");
+  if (dropdown?.open && event.target instanceof Node && !dropdown.contains(event.target)) {
+    dropdown.open = false;
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  const dropdown = app?.querySelector<HTMLDetailsElement>("#book-sort");
+  if (event.key === "Escape" && dropdown?.open) {
+    dropdown.open = false;
+    dropdown.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+    event.preventDefault();
+  }
+});
+
 function render(): void {
   if (!app) {
     return;
   }
 
   const bookListScrollTop = app.querySelector<HTMLElement>(".book-list")?.scrollTop ?? 0;
+  const searchInput = app.querySelector<HTMLInputElement>("#book-search");
+  const searchFocused = document.activeElement === searchInput;
+  const searchSelectionStart = searchInput?.selectionStart ?? null;
+  const searchSelectionEnd = searchInput?.selectionEnd ?? null;
+  const visibleBooks = getVisibleBooks(state.books, state.searchQuery, state.bookSort);
   const configured = isConfigured(state.settings);
   const selectedCount = state.selectedIds.size;
   const canSync = configured && selectedCount > 0 && !state.syncing && !state.loading;
@@ -98,15 +124,25 @@ function render(): void {
 
       ${renderFieldConfig()}
 
-      <section class="toolbar">
-        <button id="fetch-books" class="secondary" ${fetchButtonDisabled ? "disabled" : ""}>
-          ${state.loading ? "读取中..." : "读取书架"}
-        </button>
-        <button id="select-all" class="ghost" ${state.books.length === 0 ? "disabled" : ""}>全选</button>
-        <button id="select-none" class="ghost" ${state.books.length === 0 ? "disabled" : ""}>清空</button>
+      <section class="toolbar" aria-label="书架工具栏">
+        <div class="toolbar-actions">
+          <button id="fetch-books" class="secondary" ${fetchButtonDisabled ? "disabled" : ""}>
+            ${state.loading ? "读取中..." : "读取书架"}
+          </button>
+          <button id="select-all" class="ghost" ${state.books.length === 0 ? "disabled" : ""}>全选书架</button>
+          <button id="select-none" class="ghost" ${state.books.length === 0 ? "disabled" : ""}>清空选择</button>
+        </div>
+        <div class="book-controls">
+          <label class="book-search">
+            <span class="visually-hidden">搜索书名或作者</span>
+            <input id="book-search" type="search" placeholder="搜索书名或作者" value="${escapeAttribute(state.searchQuery)}" aria-controls="book-results" autocomplete="off" />
+          </label>
+          ${renderBookSort()}
+        </div>
       </section>
 
-      ${renderBooks()}
+      <p id="book-result-count" class="book-result-count" role="status">${getBookResultCount(visibleBooks.length)}</p>
+      <div id="book-results">${renderBooks(visibleBooks)}</div>
 
       ${renderSyncProgress()}
 
@@ -125,6 +161,11 @@ function render(): void {
   const bookList = app.querySelector<HTMLElement>(".book-list");
   if (bookList) {
     bookList.scrollTop = bookListScrollTop;
+  }
+  if (searchFocused) {
+    const nextSearchInput = app.querySelector<HTMLInputElement>("#book-search");
+    nextSearchInput?.focus({ preventScroll: true });
+    nextSearchInput?.setSelectionRange(searchSelectionStart, searchSelectionEnd);
   }
 }
 
@@ -317,7 +358,46 @@ function renderFieldEntry(
   `;
 }
 
-function renderBooks(): string {
+function getBookSortLabel(): string {
+  const [field, direction] = state.bookSort.split("-");
+  const fieldLabel = BOOK_SORT_FIELDS.find((option) => option.value === field)?.label ?? "最近阅读时间";
+  const directionLabel = BOOK_SORT_DIRECTIONS.find((option) => option.value === direction)?.label ?? "降序";
+  return `${fieldLabel} · ${directionLabel}`;
+}
+
+function renderBookSort(): string {
+  const [field, direction] = state.bookSort.split("-");
+  const label = getBookSortLabel();
+  return `
+    <details id="book-sort" class="book-sort">
+      <summary aria-label="书籍排序：${label}" aria-controls="book-sort-menu">
+        <span class="book-sort-label">${label}</span>
+      </summary>
+      <div id="book-sort-menu" class="book-sort-menu">
+        <fieldset class="book-sort-group">
+          <legend>排序字段</legend>
+          ${BOOK_SORT_FIELDS.map((option) => `
+            <label class="book-sort-option">
+              <input type="radio" name="book-sort-field" value="${option.value}" ${field === option.value ? "checked" : ""} aria-controls="book-results" />
+              <span>${option.label}</span>
+            </label>
+          `).join("")}
+        </fieldset>
+        <fieldset class="book-sort-group">
+          <legend>排序方向</legend>
+          ${BOOK_SORT_DIRECTIONS.map((option) => `
+            <label class="book-sort-option">
+              <input type="radio" name="book-sort-direction" value="${option.value}" ${direction === option.value ? "checked" : ""} aria-controls="book-results" />
+              <span>${option.label}</span>
+            </label>
+          `).join("")}
+        </fieldset>
+      </div>
+    </details>
+  `;
+}
+
+function renderBooks(books: WeReadBook[]): string {
   if (state.books.length === 0) {
     return `
       <section class="empty">
@@ -326,9 +406,17 @@ function renderBooks(): string {
     `;
   }
 
+  if (books.length === 0) {
+    return `
+      <section class="empty">
+        <p>没有找到匹配的书籍，请尝试其他书名或作者。</p>
+      </section>
+    `;
+  }
+
   return `
     <section class="book-list">
-      ${state.books
+      ${books
         .map(
           (book) => `
             <label class="book-row">
@@ -351,6 +439,24 @@ function renderBooks(): string {
         .join("")}
     </section>
   `;
+}
+
+function getBookResultCount(visibleCount: number): string {
+  return state.books.length > 0 ? `显示 ${visibleCount} / ${state.books.length} 本书` : "";
+}
+
+function refreshBookResults(): void {
+  const results = app?.querySelector<HTMLElement>("#book-results");
+  if (!results) {
+    return;
+  }
+  const visibleBooks = getVisibleBooks(state.books, state.searchQuery, state.bookSort);
+  results.innerHTML = renderBooks(visibleBooks);
+  const resultCount = app?.querySelector<HTMLElement>("#book-result-count");
+  if (resultCount) {
+    resultCount.textContent = getBookResultCount(visibleBooks.length);
+  }
+  bindBookEvents();
 }
 
 function renderSummary(): string {
@@ -447,6 +553,26 @@ function bindEvents(): void {
     state.fieldConfigOpen = (event.currentTarget as HTMLDetailsElement).open;
   });
   document.querySelector("#fetch-books")?.addEventListener("click", fetchBooks);
+  document.querySelector<HTMLInputElement>("#book-search")?.addEventListener("input", (event) => {
+    state.searchQuery = (event.currentTarget as HTMLInputElement).value;
+    refreshBookResults();
+  });
+  document.querySelector<HTMLDetailsElement>("#book-sort")?.addEventListener("change", (event) => {
+    const dropdown = event.currentTarget as HTMLDetailsElement;
+    const field = dropdown.querySelector<HTMLInputElement>('input[name="book-sort-field"]:checked')?.value;
+    const direction = dropdown.querySelector<HTMLInputElement>('input[name="book-sort-direction"]:checked')?.value;
+    if (!field || !direction) {
+      return;
+    }
+    state.bookSort = `${field}-${direction}` as BookSort;
+    const label = getBookSortLabel();
+    const labelElement = dropdown.querySelector<HTMLElement>(".book-sort-label");
+    if (labelElement) {
+      labelElement.textContent = label;
+    }
+    dropdown.querySelector("summary")?.setAttribute("aria-label", `书籍排序：${label}`);
+    refreshBookResults();
+  });
   document.querySelector("#select-all")?.addEventListener("click", () => {
     state.selectedIds = new Set(state.books.map((book) => book.bookId));
     void persistCurrentBookList();
@@ -505,6 +631,10 @@ function bindEvents(): void {
     button.addEventListener("click", () => removeFieldEntry(button.dataset.entryRemove));
   });
 
+  bindBookEvents();
+}
+
+function bindBookEvents(): void {
   document.querySelectorAll<HTMLInputElement>("input[data-book-id]").forEach((input) => {
     input.addEventListener("change", () => {
       const bookId = input.dataset.bookId;
@@ -604,7 +734,7 @@ async function fetchBooks(): Promise<void> {
 
   try {
     const books = await sendBackgroundMessage<WeReadBook[]>({ type: "FETCH_WEREAD_BOOKS" });
-    state.books = sortBooksByLastReadAt(books);
+    state.books = getVisibleBooks(books);
     state.selectedIds = new Set(state.books.map((book) => book.bookId));
     state.cacheFetchedAt = new Date().toISOString();
     const message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
@@ -668,15 +798,6 @@ function getFieldEntry(id: string | undefined): FieldMappingEntry<SyncField> | n
 
 function createEntryId(): string {
   return `field-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function sortBooksByLastReadAt(books: WeReadBook[]): WeReadBook[] {
-  return [...books].sort((first, second) => getBookLastReadTime(second) - getBookLastReadTime(first));
-}
-
-function getBookLastReadTime(book: WeReadBook): number {
-  const time = book.lastReadAt ? new Date(book.lastReadAt).getTime() : 0;
-  return Number.isFinite(time) ? time : 0;
 }
 
 function escapeHtml(value: string): string {
