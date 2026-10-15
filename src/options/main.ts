@@ -4,17 +4,20 @@ import { dismissTips, showTips } from "../shared/tips";
 import type { ExtensionSettings } from "../shared/types";
 import { getSettings, saveSettings } from "../storage";
 import { getTitleProperty } from "../services/notion";
+import { MAX_SETTINGS_BACKUP_SIZE, parseSettingsBackup, serializeSettingsBackup } from "../shared/settingsBackup";
 
 interface OptionsState {
   settings: ExtensionSettings | null;
   saving: boolean;
   validating: boolean;
+  transferring: "import" | "export" | null;
 }
 
 const state: OptionsState = {
   settings: null,
   saving: false,
-  validating: false
+  validating: false,
+  transferring: null
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -88,6 +91,17 @@ function render(): void {
         }
       </section>
 
+      <section class="panel">
+        <h2>配置导入与导出</h2>
+        <p class="hint">备份或迁移连接信息、书籍字段映射和封面设置。导出使用已保存的配置，请先保存修改。</p>
+        <p class="hint">配置文件包含微信读书 API Key 和 Notion 密钥，请妥善保管。导入会覆盖当前配置，导入后建议重新验证数据库。</p>
+        <div class="actions">
+          <button id="export-settings" class="secondary-link" type="button">导出配置</button>
+          <button id="import-settings" class="secondary-link" type="button">导入配置</button>
+          <input id="import-settings-file" type="file" accept=".json,application/json" aria-label="选择配置文件" hidden />
+        </div>
+      </section>
+
       <footer class="footer">
         <button id="save-settings" class="primary" ${state.saving ? "disabled" : ""}>
           ${state.saving ? "保存中..." : "保存设置"}
@@ -97,12 +111,18 @@ function render(): void {
   `;
 
   bindEvents();
+  updateControls();
 }
 
 function bindEvents(): void {
   document.querySelector("#open-sync-page")?.addEventListener("click", openSyncPage);
   document.querySelector("#validate-database")?.addEventListener("click", validateDatabaseFromForm);
   document.querySelector("#save-settings")?.addEventListener("click", saveSettingsFromForm);
+  document.querySelector("#export-settings")?.addEventListener("click", exportSettingsToFile);
+  document.querySelector("#import-settings")?.addEventListener("click", () => {
+    if (!isBusy()) document.querySelector<HTMLInputElement>("#import-settings-file")?.click();
+  });
+  document.querySelector("#import-settings-file")?.addEventListener("change", importSettingsFromFile);
 }
 
 function openSyncPage(): void {
@@ -115,6 +135,7 @@ function openSyncPage(): void {
 }
 
 async function validateDatabaseFromForm(): Promise<void> {
+  if (isBusy()) return;
   const wereadApiKey = readInputValue("#weread-api-key");
   const token = readInputValue("#notion-token");
   const databaseIdOrUrl = readInputValue("#database-url");
@@ -147,7 +168,7 @@ async function validateDatabaseFromForm(): Promise<void> {
 }
 
 async function saveSettingsFromForm(): Promise<void> {
-  if (!state.settings) {
+  if (!state.settings || isBusy()) {
     return;
   }
 
@@ -164,8 +185,14 @@ async function saveSettingsFromForm(): Promise<void> {
   render();
 
   try {
-    await saveSettings(nextSettings);
-    state.settings = nextSettings;
+    const latestSettings = {
+      ...(await getSettings()),
+      wereadApiKey: nextSettings.wereadApiKey,
+      notionToken: nextSettings.notionToken,
+      databaseUrl: nextSettings.databaseUrl
+    };
+    await saveSettings(latestSettings);
+    state.settings = latestSettings;
     showTips("设置已保存", "success");
   } catch (error) {
     showTips(getErrorMessage(error), "error");
@@ -173,6 +200,78 @@ async function saveSettingsFromForm(): Promise<void> {
     state.saving = false;
     render();
   }
+}
+
+async function exportSettingsToFile(): Promise<void> {
+  if (isBusy()) return;
+  state.transferring = "export";
+  dismissTips();
+  updateControls();
+  try {
+    const now = new Date();
+    const text = serializeSettingsBackup(await getSettings(), now);
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `weread2notion-config-${now.toISOString().replace(/[:.]/g, "-")}.json`;
+    document.body.append(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    showTips("已生成配置文件，包含 API Key 和 Notion 密钥，请妥善保管", "success");
+  } catch (error) {
+    showTips(getErrorMessage(error), "error");
+  } finally {
+    state.transferring = null;
+    updateControls();
+  }
+}
+
+async function importSettingsFromFile(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || isBusy()) return;
+
+  state.transferring = "import";
+  dismissTips();
+  updateControls();
+  try {
+    if (file.size > MAX_SETTINGS_BACKUP_SIZE) {
+      throw new Error("配置文件过大，请选择不超过 5 MB 的配置文件。");
+    }
+    const settings = parseSettingsBackup(await file.text());
+    if (!window.confirm(`导入「${file.name}」将覆盖已保存的连接信息、${settings.fieldMappings.length} 条书籍字段映射和封面设置，并替换当前页面未保存的修改。是否继续？`)) {
+      return;
+    }
+    await saveSettings(settings);
+    state.settings = settings;
+    render();
+    showTips("配置已导入并保存，建议重新验证 Notion 数据库", "success");
+  } catch (error) {
+    showTips(getErrorMessage(error), "error");
+  } finally {
+    state.transferring = null;
+    updateControls();
+  }
+}
+
+function isBusy(): boolean {
+  return state.saving || state.validating || state.transferring !== null;
+}
+
+function updateControls(): void {
+  const busy = isBusy();
+  document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+    "#save-settings, #validate-database, #export-settings, #import-settings, #import-settings-file, #weread-api-key, #notion-token, #database-url"
+  ).forEach((control) => { control.disabled = busy; });
+  const exportButton = document.querySelector("#export-settings");
+  const importButton = document.querySelector("#import-settings");
+  if (exportButton) exportButton.textContent = state.transferring === "export" ? "导出中..." : "导出配置";
+  if (importButton) importButton.textContent = state.transferring === "import" ? "导入中..." : "导入配置";
 }
 
 function readInputValue(selector: string): string {
