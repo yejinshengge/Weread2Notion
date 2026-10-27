@@ -121,6 +121,7 @@ export interface DatabaseValidationResult {
 }
 
 interface SyncBooksOptions {
+  syncHighlights?: boolean;
   onProgress?: (progress: SyncProgress) => void | Promise<void>;
   getHighlights?: (book: WeReadBook) => Promise<WeReadHighlightNote[]>;
 }
@@ -210,6 +211,7 @@ export async function syncBooksToNotion(
   books: WeReadBook[],
   options: SyncBooksOptions = {}
 ): Promise<SyncSummary> {
+  const syncHighlights = options.syncHighlights ?? true;
   const summary: SyncSummary = {
     created: 0,
     updated: 0,
@@ -237,34 +239,36 @@ export async function syncBooksToNotion(
   const highlightErrors = new Map<string, string>();
   let highlightTotal = 0;
 
-  for (const book of books) {
-    await publishProgress(
-      options,
-      books.length,
-      completed,
-      summary,
-      `正在读取划线：${book.title}`,
-      { total: 0, completed: 0 },
-      "readingHighlights"
-    );
-    try {
-      const notes = options.getHighlights ? await options.getHighlights(book) : [];
-      highlightsByBook.set(book.bookId, notes);
-      highlightTotal += notes.length;
-    } catch (error) {
-      const message = getErrorMessage(error);
-      highlightErrors.set(book.bookId, message);
-      highlightsByBook.set(book.bookId, []);
-      summary.failed.push({ title: book.title, reason: message });
+  if (syncHighlights) {
+    for (const book of books) {
       await publishProgress(
         options,
         books.length,
         completed,
         summary,
-        `读取划线失败：${book.title}`,
+        `正在读取划线：${book.title}`,
         { total: 0, completed: 0 },
         "readingHighlights"
       );
+      try {
+        const notes = options.getHighlights ? await options.getHighlights(book) : [];
+        highlightsByBook.set(book.bookId, notes);
+        highlightTotal += notes.length;
+      } catch (error) {
+        const message = getErrorMessage(error);
+        highlightErrors.set(book.bookId, message);
+        highlightsByBook.set(book.bookId, []);
+        summary.failed.push({ title: book.title, reason: message });
+        await publishProgress(
+          options,
+          books.length,
+          completed,
+          summary,
+          `读取划线失败：${book.title}`,
+          { total: 0, completed: 0 },
+          "readingHighlights"
+        );
+      }
     }
   }
 
@@ -340,7 +344,7 @@ export async function syncBooksToNotion(
           });
           pageChanged = true;
         }
-        const highlightsChanged = await replaceManagedHighlights(
+        const highlightsChanged = syncHighlights && await replaceManagedHighlights(
           liveSettings.notionToken,
           existingPageId,
           book,
@@ -368,7 +372,7 @@ export async function syncBooksToNotion(
             ...payload
           })
         });
-        if (notes.length > 0) {
+        if (syncHighlights && notes.length > 0) {
           if (defaultTemplateId && defaultTemplateBlockCount) {
             await waitForTemplateBlocks(liveSettings.notionToken, createdPage.id, defaultTemplateBlockCount);
           }
@@ -834,7 +838,6 @@ function buildManagedHighlights(book: WeReadBook, notes: WeReadHighlightNote[]):
 } {
   if (notes.length === 0) return { blocks: [], noteEnds: [] };
   const blocks = [
-    headingOneBlock(MANAGED_HIGHLIGHTS_TITLE),
     ...(book.url ? [paragraphBlock(`微信读书：${book.url}`)] : []),
     dividerBlock()
   ];
@@ -911,18 +914,6 @@ async function archiveBlock(token: string, blockId: string): Promise<void> {
 function getHighlightProgressText(note: WeReadHighlightNote): string {
   const content = note.original?.trim() || note.thought?.trim() || "无文本内容";
   return truncateText(content.replace(/\s+/g, " "), 120);
-}
-
-function headingOneBlock(content: string): NotionBlock {
-  return {
-    object: "block",
-    type: "heading_1",
-    heading_1: {
-      rich_text: [{ type: "text", text: { content } }],
-      color: "default",
-      is_toggleable: false
-    }
-  };
 }
 
 function managedHighlightsCallout(book: WeReadBook, notes: WeReadHighlightNote[]): NotionBlock {

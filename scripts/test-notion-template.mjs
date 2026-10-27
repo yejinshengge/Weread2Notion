@@ -86,8 +86,8 @@ async function runCase({ hasDefault, hasNotes }) {
     const root = pageBlocks.find((block) => block.callout?.rich_text?.[0]?.text?.content.startsWith("微信读书同步信息 · "));
     assert.equal(root?.type, "callout");
     assert.equal(root.callout.color, "default");
-    assert.equal(rootChildren.get(root.id)[0]?.heading_1?.rich_text?.[0]?.text?.content, "微信读书划线与想法（自动同步）");
-    assert.equal(rootChildren.get(root.id)[0]?.heading_1?.is_toggleable, false);
+    assert.equal(rootChildren.get(root.id)[0]?.paragraph?.rich_text?.[0]?.text?.content, `微信读书：${book.url}`);
+    assert.ok(rootChildren.get(root.id).every((block) => block.type !== "heading_1"));
     assert.ok(rootChildren.get(root.id).some((block) => block.quote?.rich_text?.[0]?.text?.content === note.original));
   } else {
     assert.equal(pageReads, 0);

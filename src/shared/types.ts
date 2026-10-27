@@ -186,7 +186,7 @@ export type BackgroundRequest =
   | { type: "SEARCH_NOTION_PAGES"; databaseId: string; query: string }
   | { type: "CHECK_NOTION_PAGE"; pageId: string }
   | { type: "EMBED_PROCESSON"; input: ProcessOnEmbedInput }
-  | { type: "SYNC_BOOKS"; books: WeReadBook[] };
+  | { type: "SYNC_BOOKS"; books: WeReadBook[]; syncHighlights: boolean };
 
 export type BackgroundResponse<T> =
   | { ok: true; data: T }

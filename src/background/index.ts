@@ -94,16 +94,19 @@ async function handleRequest(
     }
     case "SYNC_BOOKS": {
       const settings = await getSettings();
-      await publishSyncProgress({
-        total: request.books.length,
-        completed: 0,
-        currentTitle: "正在读取微信读书笔记本...",
-        stage: "preparing",
-        highlightTotal: 0,
-        highlightCompleted: 0,
-        summary: { created: 0, updated: 0, skipped: 0, failed: [] }
-      });
-      const notebooks = await fetchWeReadNotebooks(settings.wereadApiKey);
+      const syncHighlights = request.syncHighlights !== false;
+      if (syncHighlights) {
+        await publishSyncProgress({
+          total: request.books.length,
+          completed: 0,
+          currentTitle: "正在读取微信读书笔记本...",
+          stage: "preparing",
+          highlightTotal: 0,
+          highlightCompleted: 0,
+          summary: { created: 0, updated: 0, skipped: 0, failed: [] }
+        });
+      }
+      const notebooks = syncHighlights ? await fetchWeReadNotebooks(settings.wereadApiKey) : [];
       const notebooksByBookId = new Map(notebooks.map((book) => [book.bookId, book]));
       await publishSyncProgress({
         total: request.books.length,
@@ -115,6 +118,7 @@ async function handleRequest(
         summary: { created: 0, updated: 0, skipped: 0, failed: [] }
       });
       return syncBooksToNotion(settings, request.books, {
+        syncHighlights,
         onProgress: (progress) => publishSyncProgress(progress),
         getHighlights: (book) => {
           const notebook = notebooksByBookId.get(book.bookId);

@@ -16,6 +16,7 @@ interface SyncState {
   bookSort: BookSort;
   loading: boolean;
   syncing: boolean;
+  syncHighlights: boolean;
   savingFields: boolean;
   fieldConfigOpen: boolean;
   summary: SyncSummary | null;
@@ -31,6 +32,7 @@ const state: SyncState = {
   bookSort: "lastReadAt-desc",
   loading: false,
   syncing: false,
+  syncHighlights: true,
   savingFields: false,
   fieldConfigOpen: false,
   summary: null,
@@ -115,7 +117,7 @@ function render(): void {
       <header class="topbar">
         <div>
           <h1>书籍与划线同步</h1>
-          <p>${configured ? "同步书籍字段，并把划线与想法写入对应书籍页面" : "请先到配置页完成 Notion 连接，并在本页配置 WeRead ID 字段"}</p>
+          <p>${configured ? "同步书籍字段，可按需将划线与想法写入对应书籍页面" : "请先到配置页完成 Notion 连接，并在本页配置 WeRead ID 字段"}</p>
         </div>
         <button class="icon-button" id="open-options" title="切换到配置页">配置页</button>
       </header>
@@ -150,9 +152,15 @@ function render(): void {
 
       <footer class="footer">
         <span>${state.books.length > 0 ? `已选择 ${selectedCount} / ${state.books.length}` : "等待读取微信读书书架"}</span>
-        <button id="sync-books" class="primary" ${canSync ? "" : "disabled"}>
-          ${state.syncing ? "同步中..." : "同步书籍与划线"}
-        </button>
+        <div class="sync-actions">
+          <label class="toggle-row">
+            <input id="sync-highlights" type="checkbox" ${state.syncHighlights ? "checked" : ""} ${state.syncing ? "disabled" : ""} />
+            <span>同步划线</span>
+          </label>
+          <button id="sync-books" class="primary" ${canSync ? "" : "disabled"}>
+            ${state.syncing ? "同步中..." : "同步书籍"}
+          </button>
+        </div>
       </footer>
     </main>
   `;
@@ -506,8 +514,10 @@ function renderSyncProgress(): string {
     currentHighlight,
     summary
   } = state.syncProgress;
-  const highlightPercent = highlightTotal > 0
-    ? Math.round((Math.min(highlightCompleted, highlightTotal) / highlightTotal) * 100)
+  const progressTotal = state.syncHighlights ? highlightTotal : total;
+  const progressCompleted = state.syncHighlights ? highlightCompleted : completed;
+  const progressPercent = progressTotal > 0
+    ? Math.round((Math.min(progressCompleted, progressTotal) / progressTotal) * 100)
     : stage === "writing"
       ? 100
       : 0;
@@ -515,9 +525,11 @@ function renderSyncProgress(): string {
     ? "准备中..."
     : stage === "readingHighlights"
       ? "正在读取划线..."
-      : highlightTotal > 0
-        ? `${Math.min(highlightCompleted, highlightTotal)} / ${highlightTotal} 条划线 · ${highlightPercent}%`
-        : "无划线 · 已完成";
+      : !state.syncHighlights
+        ? `书籍信息 · ${progressPercent}%`
+        : highlightTotal > 0
+          ? `${Math.min(highlightCompleted, highlightTotal)} / ${highlightTotal} 条划线 · ${progressPercent}%`
+          : "无划线 · 已完成";
   const currentBookTitle = currentTitle?.replace(/^正在写入 Notion：/, "");
   const progressDetail = stage === "preparing"
     ? currentTitle || "正在准备同步..."
@@ -538,8 +550,8 @@ function renderSyncProgress(): string {
         <strong>${completed} / ${total}</strong>
         <span>${progressLabel}</span>
       </div>
-      <div class="sync-progress-track${isIndeterminate ? " is-indeterminate" : ""}" aria-label="划线同步进度">
-        <span style="width: ${highlightPercent}%"></span>
+      <div class="sync-progress-track${isIndeterminate ? " is-indeterminate" : ""}" aria-label="${state.syncHighlights ? "划线同步进度" : "书籍同步进度"}">
+        <span style="width: ${progressPercent}%"></span>
       </div>
       <p class="sync-progress-detail" title="${escapeAttribute(progressDetail)}">${escapeHtml(progressDetail)}</p>
       <small>新建 ${summary.created} · 更新 ${summary.updated} · 失败 ${summary.failed.length}</small>
@@ -584,6 +596,9 @@ function bindEvents(): void {
     render();
   });
   document.querySelector("#sync-books")?.addEventListener("click", syncSelectedBooks);
+  document.querySelector<HTMLInputElement>("#sync-highlights")?.addEventListener("change", (event) => {
+    state.syncHighlights = (event.currentTarget as HTMLInputElement).checked;
+  });
   document.querySelector("#add-field-entry")?.addEventListener("click", addFieldEntry);
   document.querySelector("#save-field-config")?.addEventListener("click", saveFieldConfig);
   document.querySelector<HTMLInputElement>("#use-notion-cover")?.addEventListener("change", (event) => {
@@ -750,6 +765,7 @@ async function fetchBooks(): Promise<void> {
 
 async function syncSelectedBooks(): Promise<void> {
   const selectedBooks = state.books.filter((book) => state.selectedIds.has(book.bookId));
+  const syncHighlights = state.syncHighlights;
   state.syncing = true;
   dismissTips();
   state.summary = null;
@@ -765,8 +781,8 @@ async function syncSelectedBooks(): Promise<void> {
   render();
 
   try {
-    state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks });
-    showTips("书籍与划线同步完成", "success");
+    state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks, syncHighlights });
+    showTips(syncHighlights ? "书籍与划线同步完成" : "书籍信息同步完成", "success");
   } catch (error) {
     showTips(getErrorMessage(error), "error");
   } finally {

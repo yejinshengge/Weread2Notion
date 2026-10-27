@@ -131,12 +131,12 @@ async function sync(notes, succeeds = true) {
 let notes = Array.from({ length: 1000 }, (_, i) => note(i));
 let writes = (await sync(notes)).filter((request) => request.method === "PATCH");
 assert.equal(roots().length, 1);
-assert.equal(roots()[0].children.length, 2004);
+assert.equal(roots()[0].children.length, 2003);
 assert.equal(roots()[0].callout.color, "default");
 assert.equal(roots()[0].callout.icon.emoji, "📖");
-assert.equal(roots()[0].children[0].type, "heading_1");
-assert.equal(textOf(roots()[0].children[0]), title);
-assert.equal(roots()[0].children[0].heading_1.is_toggleable, false);
+assert.equal(roots()[0].children[0].type, "paragraph");
+assert.equal(textOf(roots()[0].children[0]), `微信读书：${book.url}`);
+assert.ok(roots()[0].children.every((block) => block.type !== "heading_1" && textOf(block) !== title));
 assert.equal(roots()[0].children.find((block) => block.type === "heading_2")?.heading_2.is_toggleable, false);
 assert.equal(writes.filter((request) => request.path === "/v1/blocks/page/children").length, 1);
 assert.equal(writes.filter((request) => request.path === `/v1/blocks/${roots()[0].id}/children`).length, 21);
@@ -209,13 +209,19 @@ pageBlocks = [
   { id: "old-callout", type: "callout", callout: { rich_text: [{ text: { content: title } }], color: "default" }, children: [
     { id: "old-callout-quote", type: "quote", quote: { rich_text: [{ text: { content: "旧划线" } }] }, children: [] }
   ] },
+  { id: "old-summary-callout", type: "callout", callout: { rich_text: [{ text: { content: calloutPrefix + "旧同步信息" } }], color: "default" }, children: [
+    { id: "old-inner-title", type: "heading_1", heading_1: { rich_text: [{ text: { content: title } }] }, children: [] },
+    { id: "old-inner-quote", type: "quote", quote: { rich_text: [{ text: { content: "旧划线" } }] }, children: [] }
+  ] },
   manual
 ];
 await sync([note(1)]);
 assert.equal(roots().length, 1);
 assert.ok(!findBlock("old-callout"));
-assert.equal(roots()[0].children[0].type, "heading_1");
-console.log("The previous Callout title is replaced by a heading inside the new Callout");
+assert.ok(!findBlock("old-summary-callout"));
+assert.ok(roots()[0].children.every((block) => block.type !== "heading_1" && textOf(block) !== title));
+assert.equal(pageBlocks.at(-1).id, "manual");
+console.log("Previous Callout layouts are replaced without restoring the old heading");
 
 pageBlocks = [
   { id: "old-toggle-heading", type: "heading_1", heading_1: { rich_text: [{ text: { content: title } }], is_toggleable: true }, children: [
