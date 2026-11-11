@@ -1,6 +1,7 @@
 import "../options/styles.css";
 import "./styles.css";
 import { BackgroundError, openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
+import { initTheme } from "../shared/theme";
 import { dismissTips, showTips } from "../shared/tips";
 import type { NotionPageConnection, ProcessOnEmbedInput, ProcessOnEmbedResult } from "../shared/types";
 import { getSettings } from "../storage";
@@ -15,20 +16,20 @@ document.body.classList.toggle("embedded", window.parent !== window);
 void init();
 
 async function init(): Promise<void> {
+  await initTheme();
   render();
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes.settings || changes.settings.oldValue?.notionToken === changes.settings.newValue?.notionToken) return;
+    connectionRevision += 1;
+    resetPageConnection();
+    void refreshCredentialState().catch(showError);
+  });
   try {
     await refreshCredentialState();
   } catch (error) {
     showError(error);
   }
 }
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes.settings || changes.settings.oldValue?.notionToken === changes.settings.newValue?.notionToken) return;
-  connectionRevision += 1;
-  resetPageConnection();
-  void refreshCredentialState().catch(showError);
-});
 
 function render(): void {
   if (!app) return;

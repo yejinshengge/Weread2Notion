@@ -2,6 +2,7 @@ import "./styles.css";
 import { FIELD_LABELS, SYNC_FIELDS, getBookAllowedTypes, isWritablePropertyType } from "../shared/fields";
 import { bindCustomValueControls, renderCustomValueControl } from "../shared/customFields";
 import { openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
+import { initTheme } from "../shared/theme";
 import { dismissTips, showTips } from "../shared/tips";
 import type { DatabaseProperty, ExtensionSettings, FieldMappingEntry, SyncField, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
 import { getCachedBookList, getSettings, saveCachedBookList, saveSettings } from "../storage";
@@ -46,7 +47,7 @@ document.body.classList.toggle("embedded", window.parent !== window);
 void init();
 
 async function init(): Promise<void> {
-  const [settings, cachedBookList] = await Promise.all([getSettings(), getCachedBookList()]);
+  const [settings, cachedBookList] = await Promise.all([getSettings(), getCachedBookList(), initTheme()]);
   state.settings = settings;
   let restoredMessage = "";
   if (cachedBookList) {

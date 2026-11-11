@@ -1,4 +1,5 @@
 import "./styles.css";
+import { initTheme } from "../shared/theme";
 
 type AppTab = "sync" | "processon" | "settings";
 
@@ -11,8 +12,10 @@ const tabs: Array<{ id: AppTab; label: string; src: string }> = [
 
 let activeTab: AppTab = getInitialTab();
 
-render();
-updateActiveTab();
+void initTheme().then(() => {
+  render();
+  updateActiveTab();
+});
 
 window.addEventListener("message", (event: MessageEvent<{ type?: string; tab?: AppTab }>) => {
   if (event.origin !== window.location.origin || event.data?.type !== "SWITCH_TAB") {

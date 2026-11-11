@@ -1,5 +1,6 @@
 import "./styles.css";
 import { sendBackgroundMessage } from "../shared/runtime";
+import { getThemePreference, initTheme, saveThemePreference } from "../shared/theme";
 import { dismissTips, showTips } from "../shared/tips";
 import type { ExtensionSettings } from "../shared/types";
 import { getSettings, saveSettings } from "../storage";
@@ -27,7 +28,8 @@ document.body.classList.toggle("embedded", window.parent !== window);
 void init();
 
 async function init(): Promise<void> {
-  state.settings = await getSettings();
+  const [settings] = await Promise.all([getSettings(), initTheme(updateThemeControl)]);
+  state.settings = settings;
   render();
 }
 
@@ -52,6 +54,15 @@ function render(): void {
           <button class="secondary-link" id="open-sync-page" type="button">打开书籍同步</button>
         </div>
       </header>
+
+      <section class="panel appearance-panel">
+        <label for="theme-preference">外观</label>
+        <select id="theme-preference">
+          <option value="system">跟随系统</option>
+          <option value="light">浅色</option>
+          <option value="dark">深色</option>
+        </select>
+      </section>
 
       <section class="panel">
         <h2>微信读书连接</h2>
@@ -112,6 +123,7 @@ function render(): void {
 
   bindEvents();
   updateControls();
+  updateThemeControl();
 }
 
 function bindEvents(): void {
@@ -123,6 +135,22 @@ function bindEvents(): void {
     if (!isBusy()) document.querySelector<HTMLInputElement>("#import-settings-file")?.click();
   });
   document.querySelector("#import-settings-file")?.addEventListener("change", importSettingsFromFile);
+  app?.querySelector("#theme-preference")?.addEventListener("change", saveThemeFromControl);
+}
+
+function updateThemeControl(): void {
+  const select = app?.querySelector<HTMLSelectElement>("#theme-preference");
+  if (select) select.value = getThemePreference();
+}
+
+async function saveThemeFromControl(event: Event): Promise<void> {
+  const select = event.currentTarget as HTMLSelectElement;
+  try {
+    await saveThemePreference(select.value);
+  } catch {
+    updateThemeControl();
+    showTips("外观设置保存失败，请重试", "error");
+  }
 }
 
 function openSyncPage(): void {

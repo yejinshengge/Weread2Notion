@@ -14,7 +14,7 @@
   padding: 9px 12px 9px 10px;
   border: 1px solid transparent;
   border-radius: 12px;
-  box-shadow: 0 14px 32px rgb(22 32 27 / 18%);
+  box-shadow: 0 14px 32px var(--floating-shadow);
   font-size: 13px;
   font-weight: 600;
   transform: translate(-50%, -8px);
@@ -22,21 +22,21 @@
 }
 
 .tips.success {
-  color: #1d5735;
-  border-color: #c7e4ce;
-  background: #f0faf2;
+  color: var(--success-text);
+  border-color: var(--success-border);
+  background: var(--success-bg);
 }
 
 .tips.error {
-  color: #8c2b24;
-  border-color: #f0c8c2;
-  background: #fff4f2;
+  color: var(--error-text);
+  border-color: var(--error-border);
+  background: var(--error-bg);
 }
 
 .tips.info {
-  color: #315b68;
-  border-color: #c9e1e6;
-  background: #f0fafc;
+  color: var(--info-text);
+  border-color: var(--info-border);
+  background: var(--info-bg);
 }
 
 .tips-icon {
@@ -46,21 +46,21 @@
   height: 25px;
   place-items: center;
   border-radius: 50%;
-  color: #ffffff;
+  color: inherit;
   font-size: 13px;
   font-weight: 800;
 }
 
 .tips.success .tips-icon {
-  background: #23814b;
+  background: var(--success-badge);
 }
 
 .tips.error .tips-icon {
-  background: #b44136;
+  background: var(--error-badge);
 }
 
 .tips.info .tips-icon {
-  background: #3b8090;
+  background: var(--info-badge);
 }
 
 .tips-message {
@@ -95,7 +95,7 @@
 
 .tips-close:hover {
   opacity: 1;
-  background: rgb(22 32 27 / 7%);
+  background: var(--hover-overlay);
 }
 
 .tips-close:focus-visible,
