@@ -56,6 +56,7 @@ interface NotebookBookLike {
 
 interface WeReadNotebookResponse extends WeReadGatewayResponse {
   books?: unknown[];
+  totalBookCount?: number;
   hasMore?: boolean | number;
 }
 
@@ -120,29 +121,31 @@ interface ChapterInfosResponse extends WeReadGatewayResponse {
 }
 
 const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway";
-const WEREAD_SKILL_VERSION = "1.0.5";
+const WEREAD_SKILL_VERSION = "1.0.6";
 const WEREAD_PAGE_SIZE = 100;
 const PROGRESS_CONCURRENCY = 8;
 
-class WeReadUpgradeRequiredError extends Error {}
+type UpgradeNoticeHandler = (notice: string) => void;
+type WeReadGateway = ReturnType<typeof createWeReadGateway>;
 
 export async function fetchWeReadBooks(
   apiKey: string,
-  options: { includeStartReadAt?: boolean } = {}
+  options: { includeStartReadAt?: boolean; onUpgradeNotice?: UpgradeNoticeHandler } = {}
 ): Promise<WeReadBook[]> {
-  const payload = await callWeReadGateway<WeReadShelfResponse>(apiKey, "/shelf/sync");
+  const request = createWeReadGateway(apiKey, options.onUpgradeNotice);
+  const payload = await request<WeReadShelfResponse>("/shelf/sync");
   const books = Array.isArray(payload.books) ? payload.books : [];
   const normalizedBooks = books
     .map((item) => normalizeBook(item as BookLike))
     .filter((book): book is WeReadBook => Boolean(book));
 
-  return enrichBooksWithProgress(apiKey, normalizedBooks, options);
+  return enrichBooksWithProgress(request, normalizedBooks, options.includeStartReadAt);
 }
 
 async function enrichBooksWithProgress(
-  apiKey: string,
+  request: WeReadGateway,
   books: WeReadBook[],
-  options: { includeStartReadAt?: boolean }
+  includeStartReadAt?: boolean
 ): Promise<WeReadBook[]> {
   const enrichedBooks = [...books];
   let nextIndex = 0;
@@ -154,7 +157,7 @@ async function enrichBooksWithProgress(
       const book = books[index];
 
       try {
-        const payload = await fetchBookProgress(apiKey, book.bookId);
+        const payload = await request<WeReadProgressResponse>("/book/getprogress", { bookId: book.bookId });
         const progressRecord = payload.book;
         const finishReading = Boolean(progressRecord?.finishReading) || book.status === "已读完";
         const progress = normalizeProgress(firstNumber(progressRecord?.progress, book.progress), finishReading);
@@ -163,15 +166,12 @@ async function enrichBooksWithProgress(
           ...book,
           progress,
           status: getReadingStatus(progress, finishReading, started),
-          startReadAt: options.includeStartReadAt
+          startReadAt: includeStartReadAt
             ? unixSecondsToIso(progressRecord?.startReadingTime) ?? book.startReadAt
             : undefined,
           lastReadAt: started ? unixSecondsToIso(progressRecord?.updateTime) ?? book.lastReadAt : undefined
         };
-      } catch (error) {
-        if (error instanceof WeReadUpgradeRequiredError) {
-          throw error;
-        }
+      } catch {
         enrichedBooks[index] = book;
       }
     }
@@ -182,17 +182,24 @@ async function enrichBooksWithProgress(
   return enrichedBooks;
 }
 
-export async function fetchWeReadNotebooks(apiKey: string): Promise<WeReadNotebookBook[]> {
+export async function fetchWeReadNotebooks(
+  apiKey: string,
+  onUpgradeNotice?: UpgradeNoticeHandler
+): Promise<WeReadNotebookBook[]> {
+  const request = createWeReadGateway(apiKey, onUpgradeNotice);
   const books: unknown[] = [];
   const seenCursors = new Set<number>();
   let lastSort: number | undefined;
 
   while (true) {
-    const payload = await callWeReadGateway<WeReadNotebookResponse>(apiKey, "/user/notebooks", {
+    const payload = await request<WeReadNotebookResponse>("/user/notebooks", {
       count: WEREAD_PAGE_SIZE,
       ...(lastSort === undefined ? {} : { lastSort })
     });
-    const pageBooks = Array.isArray(payload.books) ? payload.books : [];
+    const pageBooks = payload.books ?? (payload.totalBookCount === 0 ? [] : undefined);
+    if (!Array.isArray(pageBooks)) {
+      throw new Error("微信读书笔记本接口未返回书籍列表");
+    }
     books.push(...pageBooks);
 
     if (!payload.hasMore) {
@@ -216,19 +223,15 @@ export async function fetchWeReadNotebooks(apiKey: string): Promise<WeReadNotebo
 export async function fetchWeReadHighlights(
   apiKey: string,
   bookId: string,
-  expectedCounts?: Pick<WeReadNotebookBook, "bookmarkCount" | "reviewCount">
+  expectedCounts?: Pick<WeReadNotebookBook, "bookmarkCount" | "reviewCount">,
+  onUpgradeNotice?: UpgradeNoticeHandler
 ): Promise<WeReadHighlightNote[]> {
+  const request = createWeReadGateway(apiKey, onUpgradeNotice);
   const [chapterResult, bookmarkResult, reviewResult] = await Promise.allSettled([
-    fetchChapterInfo(apiKey, bookId),
-    fetchBookmarkList(apiKey, bookId),
-    fetchReviewList(apiKey, bookId)
+    fetchChapterInfo(request, bookId),
+    fetchBookmarkList(request, bookId),
+    fetchReviewList(request, bookId)
   ]);
-
-  for (const result of [chapterResult, bookmarkResult, reviewResult]) {
-    if (result.status === "rejected" && result.reason instanceof WeReadUpgradeRequiredError) {
-      throw result.reason;
-    }
-  }
 
   if (chapterResult.status === "rejected" || bookmarkResult.status === "rejected" || reviewResult.status === "rejected") {
     const reasons = [
@@ -302,23 +305,19 @@ function normalizeNotebookBook(item: NotebookBookLike): WeReadNotebookBook | nul
   };
 }
 
-async function fetchBookProgress(apiKey: string, bookId: string): Promise<WeReadProgressResponse> {
-  return callWeReadGateway<WeReadProgressResponse>(apiKey, "/book/getprogress", { bookId });
-}
-
-async function fetchBookmarkList(apiKey: string, bookId: string): Promise<BookmarkLike[]> {
-  const payload = await callWeReadGateway<WeReadBookmarkListResponse>(apiKey, "/book/bookmarklist", { bookId });
+async function fetchBookmarkList(request: WeReadGateway, bookId: string): Promise<BookmarkLike[]> {
+  const payload = await request<WeReadBookmarkListResponse>("/book/bookmarklist", { bookId });
   const bookmarks = Array.isArray(payload.updated) ? payload.updated : [];
   return bookmarks.map(normalizeBookmark).filter((item): item is BookmarkLike => Boolean(item));
 }
 
-async function fetchReviewList(apiKey: string, bookId: string): Promise<ReviewLike[]> {
+async function fetchReviewList(request: WeReadGateway, bookId: string): Promise<ReviewLike[]> {
   const reviews: ReviewLike[] = [];
   const seenCursors = new Set<number>([0]);
   let synckey = 0;
 
   while (true) {
-    const payload = await callWeReadGateway<WeReadReviewListResponse>(apiKey, "/review/list/mine", {
+    const payload = await request<WeReadReviewListResponse>("/review/list/mine", {
       bookid: bookId,
       synckey,
       count: WEREAD_PAGE_SIZE
@@ -342,8 +341,8 @@ async function fetchReviewList(apiKey: string, bookId: string): Promise<ReviewLi
   return reviews;
 }
 
-async function fetchChapterInfo(apiKey: string, bookId: string): Promise<Map<string, ChapterLocation>> {
-  const payload = await callWeReadGateway<ChapterInfosResponse>(apiKey, "/book/chapterinfo", { bookId });
+async function fetchChapterInfo(request: WeReadGateway, bookId: string): Promise<Map<string, ChapterLocation>> {
+  const payload = await request<ChapterInfosResponse>("/book/chapterinfo", { bookId });
   const chapters = new Map<string, ChapterLocation>();
   const ancestors: Array<{ level: number; title: string }> = [];
   for (const item of payload.chapters ?? []) {
@@ -388,11 +387,7 @@ function addChapter(
   }
 }
 
-async function callWeReadGateway<T extends WeReadGatewayResponse>(
-  apiKey: string,
-  apiName: string,
-  params: Record<string, unknown> = {}
-): Promise<T> {
+function createWeReadGateway(apiKey: string, onUpgradeNotice?: UpgradeNoticeHandler) {
   const normalizedApiKey = apiKey.trim();
   if (!normalizedApiKey) {
     throw new Error("请先在配置页填写 WEREAD_API_KEY");
@@ -401,41 +396,46 @@ async function callWeReadGateway<T extends WeReadGatewayResponse>(
     throw new Error("WEREAD_API_KEY 格式无效，应以 wrk- 开头");
   }
 
-  const response = await fetch(WEREAD_GATEWAY_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${normalizedApiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ...params,
-      api_name: apiName,
-      skill_version: WEREAD_SKILL_VERSION
-    })
-  });
+  return async function request<T extends WeReadGatewayResponse>(
+    apiName: string,
+    params: Record<string, unknown> = {}
+  ): Promise<T> {
+    const response = await fetch(WEREAD_GATEWAY_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${normalizedApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ ...params, api_name: apiName, skill_version: WEREAD_SKILL_VERSION })
+    });
 
-  let payload: WeReadGatewayResponse;
-  try {
-    payload = (await response.json()) as WeReadGatewayResponse;
-  } catch {
-    throw new Error(`微信读书接口返回了无法解析的响应（HTTP ${response.status}）`);
-  }
+    let payload: T;
+    try {
+      payload = (await response.json()) as T;
+    } catch {
+      throw new Error(`微信读书接口返回了无法解析的响应（HTTP ${response.status}）`);
+    }
 
-  if (payload.upgrade_info) {
-    const upgradeMessage = payload.upgrade_info.message?.trim() || "当前微信读书技能版本需要升级";
-    const upgradeUrl = emptyToUndefined(payload.upgrade_info.upgrade_url);
-    throw new WeReadUpgradeRequiredError(
-      `微信读书接口已暂停：${upgradeMessage}${upgradeUrl ? `（升级地址：${upgradeUrl}）` : ""}`
-    );
-  }
-
-  if (!response.ok || (typeof payload.errcode === "number" && payload.errcode !== 0)) {
-    const detail = payload.errmsg?.trim() || payload.message?.trim();
-    throw new Error(detail || `微信读书接口调用失败（HTTP ${response.status}）`);
-  }
-
-  return payload as T;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error(`微信读书接口 ${apiName} 返回的数据格式无效（HTTP ${response.status}）`);
+    }
+    const { errcode, errmsg, message, upgrade_info: upgradeInfo, ...data } = payload;
+    if (!response.ok || (typeof errcode === "number" && errcode !== 0)) {
+      const detail = errmsg?.trim() || message?.trim();
+      throw new Error(detail || `微信读书接口调用失败（HTTP ${response.status}）`);
+    }
+    if (upgradeInfo && !Object.keys(data).length) {
+      throw new Error(`微信读书接口 ${apiName} 未返回业务数据`);
+    }
+    if (upgradeInfo && onUpgradeNotice) {
+      const notice = typeof upgradeInfo.message === "string" ? upgradeInfo.message.trim() : "";
+      const text = notice || "微信读书接口有新版本，可稍后更新扩展。";
+      const url = typeof upgradeInfo.upgrade_url === "string" ? upgradeInfo.upgrade_url.trim() : "";
+      onUpgradeNotice(url ? `${text}（${url}）` : text);
+    }
+    return payload;
+  };
 }
 
 function unwrapReview(item: unknown): ReviewLike | null {
@@ -616,7 +616,7 @@ function clampProgress(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
-  if (value > 0 && value <= 1) {
+  if (value > 0 && value < 1) {
     return Math.round(value * 100);
   }
   return Math.min(100, Math.max(0, Math.round(value)));

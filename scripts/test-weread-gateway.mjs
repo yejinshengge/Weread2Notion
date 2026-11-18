@@ -22,34 +22,26 @@ const fixtures = [
   { bookId: "blank", title: "空链接", readerLink: " ", deepLink: " " }
 ];
 const requests = [];
-let requireUpgrade = false;
 const upgradeUrl = "https://cdn.weread.qq.com/skills/weread-skills.zip";
+const upgrade = { message: "微信读书有可用更新", upgrade_url: upgradeUrl };
+let upgradeInfo;
+const reply = (data) => new Response(JSON.stringify({ ...data, upgrade_info: upgradeInfo }));
 
 globalThis.fetch = async (url, init) => {
   assert.equal(url, "https://i.weread.qq.com/api/agent/gateway");
   const request = JSON.parse(init.body);
   requests.push(request);
-  assert.equal(request.skill_version, "1.0.5");
+  assert.equal(request.skill_version, "1.0.6");
   assert.equal(request.params, undefined);
-
-  if (requireUpgrade) {
-    return new Response(JSON.stringify({
-      books: fixtures,
-      upgrade_info: {
-        message: "请立即从 upgrade_url 下载最新版",
-        upgrade_url: upgradeUrl
-      }
-    }));
-  }
 
   switch (request.api_name) {
     case "/shelf/sync":
-      return new Response(JSON.stringify({ books: fixtures }));
+      return reply({ books: fixtures });
     case "/book/getprogress":
-      return new Response(JSON.stringify({ book: { progress: 0 } }));
+      return reply({ book: { progress: 25 } });
     case "/user/notebooks":
       assert.equal(request.count, 100);
-      return new Response(JSON.stringify({ books: fixtures.map((book) => ({ book })), hasMore: 0 }));
+      return reply({ books: fixtures.map((book) => ({ book })), hasMore: 0 });
     default:
       throw new Error(`Unexpected API: ${request.api_name}`);
   }
@@ -60,14 +52,34 @@ assert.deepEqual((await fetchWeReadBooks("wrk-test")).map((book) => book.url), e
 assert.deepEqual((await fetchWeReadNotebooks("wrk-test")).map((book) => book.url), expectedUrls);
 console.log("Shelf and notebook URLs prefer readerLink, fall back to deepLink and omit missing links");
 
-requireUpgrade = true;
+upgradeInfo = upgrade;
 requests.length = 0;
-for (const fetchBooks of [fetchWeReadBooks, fetchWeReadNotebooks]) {
-  await assert.rejects(fetchBooks("wrk-test"), (error) => {
-    assert.ok(error.message.startsWith("微信读书接口已暂停："));
-    assert.ok(error.message.includes(upgradeUrl));
-    return true;
-  });
+const notices = [];
+const onUpgradeNotice = (notice) => notices.push(notice);
+const shelf = await fetchWeReadBooks("wrk-test", { onUpgradeNotice });
+assert.deepEqual(shelf.map((book) => book.url), expectedUrls);
+assert.ok(shelf.every((book) => book.progress === 25));
+const notebooks = await fetchWeReadNotebooks("wrk-test", onUpgradeNotice);
+assert.deepEqual(notebooks.map((book) => book.url), expectedUrls);
+assert.deepEqual([...new Set(notices)], [`${upgrade.message}（${upgradeUrl}）`]);
+assert.deepEqual(requests.map((request) => request.api_name), [
+  "/shelf/sync", ...fixtures.map(() => "/book/getprogress"), "/user/notebooks"
+]);
+console.log("Upgrade notices preserve shelf, progress and notebook data without retrying requests");
+
+for (const empty of [{ books: [], hasMore: 0 }, { totalBookCount: 0, hasMore: 0 }]) {
+  globalThis.fetch = async () => reply(empty);
+  assert.deepEqual(await fetchWeReadNotebooks("wrk-test", onUpgradeNotice), []);
 }
-assert.deepEqual(requests.map((request) => request.api_name), ["/shelf/sync", "/user/notebooks"]);
-console.log("Upgrade notices stop reading even when books are returned, and show the actual download URL");
+globalThis.fetch = async () => reply({ errcode: 0 });
+await assert.rejects(fetchWeReadBooks("wrk-test"), /未返回业务数据/);
+
+for (const [status, errcode] of [[200, -1], [403, 0]]) {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    errcode, errmsg: "访问失败", upgrade_info: upgrade
+  }), { status });
+  notices.length = 0;
+  await assert.rejects(fetchWeReadNotebooks("wrk-test", onUpgradeNotice), /访问失败/);
+  assert.deepEqual(notices, []);
+}
+console.log("HTTP and gateway errors take precedence over upgrade notices");

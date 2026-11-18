@@ -20,16 +20,14 @@ globalThis.fetch = async (_url, init) => {
     return response({
       books: [
         { bookId: "finished", title: "已读完", progress: 67, finishReading: 1 },
-        { bookId: "reading", title: "阅读中", progress: 0.67, finishReading: 0 }
+        { bookId: "reading", title: "阅读中", progress: 0.67, finishReading: 0 },
+        { bookId: "one", title: "刚开始", progress: 1, finishReading: 0 }
       ]
     });
   }
   if (request.api_name === "/book/getprogress") {
-    return response({
-      book: request.bookId === "finished"
-        ? { progress: 67, isStartReading: 1 }
-        : { progress: 0.67, isStartReading: 1 }
-    });
+    const progress = { finished: 67, reading: 0.67, one: 1 }[request.bookId];
+    return response({ book: { progress, isStartReading: 1 } });
   }
   throw new Error(`Unexpected API: ${request.api_name}`);
 };
@@ -39,8 +37,9 @@ assert.deepEqual(
   books.map(({ bookId, progress, status }) => ({ bookId, progress, status })),
   [
     { bookId: "finished", progress: 100, status: "已读完" },
-    { bookId: "reading", progress: 67, status: "阅读中" }
+    { bookId: "reading", progress: 67, status: "阅读中" },
+    { bookId: "one", progress: 1, status: "阅读中" }
   ]
 );
 
-console.log("Finished books normalize to 100%; fractional progress remains supported");
+console.log("Integer 1 means 1%, fractional progress is supported, and finished books show 100%");

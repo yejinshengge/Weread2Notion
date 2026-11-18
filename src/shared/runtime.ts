@@ -15,6 +15,12 @@ export class BackgroundError extends Error {
 }
 
 export async function sendBackgroundMessage<T>(request: BackgroundRequest): Promise<T> {
+  return (await sendBackgroundMessageWithDetails<T>(request)).data;
+}
+
+export async function sendBackgroundMessageWithDetails<T>(
+  request: BackgroundRequest
+): Promise<Extract<BackgroundResponse<T>, { ok: true }>> {
   const response = (await chrome.runtime.sendMessage(request)) as BackgroundResponse<T> | undefined;
   if (!response || (response.ok !== true && response.ok !== false)) {
     throw incompleteResponseError(request);
@@ -24,7 +30,7 @@ export async function sendBackgroundMessage<T>(request: BackgroundRequest): Prom
     throw new BackgroundError(response);
   }
   if (!hasCompleteResponseData(request, response.data)) throw incompleteResponseError(request);
-  return response.data;
+  return response;
 }
 
 function hasCompleteResponseData(request: BackgroundRequest, data: unknown): boolean {

@@ -189,5 +189,5 @@ export type BackgroundRequest =
   | { type: "SYNC_BOOKS"; books: WeReadBook[]; syncHighlights: boolean };
 
 export type BackgroundResponse<T> =
-  | { ok: true; data: T }
+  | { ok: true; data: T; wereadUpgradeNotice?: string }
   | { ok: false; error: string; field?: string; code?: string; uncertain?: boolean };

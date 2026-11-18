@@ -1,7 +1,7 @@
 import "./styles.css";
 import { FIELD_LABELS, SYNC_FIELDS, getBookAllowedTypes, isWritablePropertyType } from "../shared/fields";
 import { bindCustomValueControls, renderCustomValueControl } from "../shared/customFields";
-import { openOptionsPage, sendBackgroundMessage } from "../shared/runtime";
+import { openOptionsPage, sendBackgroundMessageWithDetails } from "../shared/runtime";
 import { initTheme } from "../shared/theme";
 import { dismissTips, showTips } from "../shared/tips";
 import type { DatabaseProperty, ExtensionSettings, FieldMappingEntry, SyncField, SyncProgress, SyncSummary, WeReadBook } from "../shared/types";
@@ -749,13 +749,18 @@ async function fetchBooks(): Promise<void> {
   render();
 
   try {
-    const books = await sendBackgroundMessage<WeReadBook[]>({ type: "FETCH_WEREAD_BOOKS" });
+    const { data: books, wereadUpgradeNotice } = await sendBackgroundMessageWithDetails<WeReadBook[]>({
+      type: "FETCH_WEREAD_BOOKS"
+    });
     state.books = getVisibleBooks(books);
     state.selectedIds = new Set(state.books.map((book) => book.bookId));
     state.cacheFetchedAt = new Date().toISOString();
     const message = state.books.length > 0 ? `已读取 ${state.books.length} 本书` : "没有读取到书籍";
     await persistCurrentBookList();
-    showTips(message, state.books.length > 0 ? "success" : "info");
+    showTips(
+      wereadUpgradeNotice ? `${message}\n${wereadUpgradeNotice}` : message,
+      state.books.length > 0 ? "success" : "info"
+    );
   } catch (error) {
     showTips(getErrorMessage(error), "error");
   } finally {
@@ -782,8 +787,12 @@ async function syncSelectedBooks(): Promise<void> {
   render();
 
   try {
-    state.summary = await sendBackgroundMessage<SyncSummary>({ type: "SYNC_BOOKS", books: selectedBooks, syncHighlights });
-    showTips(syncHighlights ? "书籍与划线同步完成" : "书籍信息同步完成", "success");
+    const { data, wereadUpgradeNotice } = await sendBackgroundMessageWithDetails<SyncSummary>({
+      type: "SYNC_BOOKS", books: selectedBooks, syncHighlights
+    });
+    state.summary = data;
+    const message = syncHighlights ? "书籍与划线同步完成" : "书籍信息同步完成";
+    showTips(wereadUpgradeNotice ? `${message}\n${wereadUpgradeNotice}` : message, "success");
   } catch (error) {
     showTips(getErrorMessage(error), "error");
   } finally {

@@ -106,6 +106,6 @@ npm run build
 
 ## 说明
 
-微信读书读取统一通过 `POST https://i.weread.qq.com/api/agent/gateway` 完成。当前适配官方 Skill `1.0.5`，每次请求都会携带 `skill_version`，业务参数与 `api_name` 同层传递；API Key 仅保存在扩展的本地存储中。
+扩展通过 `POST https://i.weread.qq.com/api/agent/gateway` 读取微信读书数据，每次请求携带 `skill_version` 和与 `api_name` 同层的业务参数。API Key 保存在扩展的本地存储中。当前适配[微信读书官方 Skill 1.0.6](https://github.com/Tencent/WeChatReading/blob/main/skills/SKILL.md)。
 
-书籍 URL 优先使用接口返回的 `readerLink`（阅读器链接），没有时使用 `deepLink`（书籍详情链接）；两个字段均缺失时省略 URL。接口返回 `upgrade_info` 时会停止读取，并显示升级提示及下载地址。
+书籍 URL 优先使用接口返回的 `readerLink`（阅读器链接），缺少时使用 `deepLink`（书籍详情链接）。两个字段均缺失时省略 URL。成功响应附带 `upgrade_info` 时，扩展会继续处理本次数据，在读取书架或同步完成后显示一次升级提示和接口提供的下载地址。

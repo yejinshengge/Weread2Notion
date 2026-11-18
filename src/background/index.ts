@@ -28,8 +28,13 @@ chrome.action.onClicked.addListener(() => {
 chrome.runtime.onMessage.addListener((request: unknown, _sender, sendResponse) => {
   if (!isBackgroundRequest(request)) return false;
 
-  handleRequest(request)
-    .then((data) => sendResponse({ ok: true, data } satisfies BackgroundResponse<unknown>))
+  let wereadUpgradeNotice: string | undefined;
+  handleRequest(request, (notice) => { wereadUpgradeNotice ??= notice; })
+    .then((data) => sendResponse({
+      ok: true,
+      data,
+      ...(wereadUpgradeNotice ? { wereadUpgradeNotice } : {})
+    } satisfies BackgroundResponse<unknown>))
     .catch((error) => sendResponse({
       ok: false,
       error: getErrorMessage(error),
@@ -45,12 +50,16 @@ function isBackgroundRequest(request: unknown): request is BackgroundRequest {
 }
 
 async function handleRequest(
-  request: BackgroundRequest
+  request: BackgroundRequest,
+  onUpgradeNotice: (notice: string) => void
 ): Promise<WeReadBook[] | SyncSummary | unknown> {
   switch (request.type) {
     case "FETCH_WEREAD_BOOKS": {
       const settings = await getSettings();
-      return fetchWeReadBooks(settings.wereadApiKey, { includeStartReadAt: isStartReadAtEnabled(settings) });
+      return fetchWeReadBooks(settings.wereadApiKey, {
+        includeStartReadAt: isStartReadAtEnabled(settings),
+        onUpgradeNotice
+      });
     }
     case "VALIDATE_NOTION": {
       const validation = await validateDatabase(request.token, request.databaseIdOrUrl);
@@ -106,7 +115,7 @@ async function handleRequest(
           summary: { created: 0, updated: 0, skipped: 0, failed: [] }
         });
       }
-      const notebooks = syncHighlights ? await fetchWeReadNotebooks(settings.wereadApiKey) : [];
+      const notebooks = syncHighlights ? await fetchWeReadNotebooks(settings.wereadApiKey, onUpgradeNotice) : [];
       const notebooksByBookId = new Map(notebooks.map((book) => [book.bookId, book]));
       await publishSyncProgress({
         total: request.books.length,
@@ -123,7 +132,7 @@ async function handleRequest(
         getHighlights: (book) => {
           const notebook = notebooksByBookId.get(book.bookId);
           return notebook
-            ? fetchWeReadHighlights(settings.wereadApiKey, book.bookId, notebook)
+            ? fetchWeReadHighlights(settings.wereadApiKey, book.bookId, notebook, onUpgradeNotice)
             : Promise.resolve([]);
         }
       });

@@ -8,8 +8,12 @@ const book = { bookId: "book", title: "测试书", author: "作者", cover: "htt
 const textOf = (block) => block[block.type]?.rich_text?.map((text) => text.plain_text ?? text.text?.content ?? "").join("") ?? "";
 const json = (body) => new Response(JSON.stringify(body));
 const list = (results = []) => json({ results, has_more: false, next_cursor: null });
+const upgradeMessage = "微信读书接口有可用更新";
 
-function createBackground({ existingPage = true, overwrite = true, useNotionCover = true } = {}) {
+function createBackground({
+  existingPage = true, overwrite = true, useNotionCover = true, upgradeApis = [],
+  notebookPage = { books: [{ book, noteCount: 1 }], hasMore: 0 }
+} = {}) {
   let listener;
   let nextId = 0;
   const requests = [];
@@ -39,11 +43,17 @@ function createBackground({ existingPage = true, overwrite = true, useNotionCove
     const body = init.body ? JSON.parse(init.body) : {};
     requests.push({ hostname, path, method: init.method, body });
     if (hostname === "i.weread.qq.com") {
+      assert.equal(body.skill_version, "1.0.6");
+      const reply = (data) => json(upgradeApis.includes(body.api_name)
+        ? { ...data, upgrade_info: { message: upgradeMessage } }
+        : data);
       switch (body.api_name) {
-        case "/user/notebooks": return json({ books: [{ book, noteCount: 1 }], hasMore: 0 });
-        case "/book/chapterinfo": return json({ chapters: [{ chapterUid: 1, title: "第一章" }] });
-        case "/book/bookmarklist": return json({ updated: [{ bookmarkId: "note", chapterUid: 1, markText: "最新划线" }] });
-        case "/review/list/mine": return json({ reviews: [], hasMore: 0 });
+        case "/shelf/sync": return reply({ books: [book] });
+        case "/book/getprogress": return reply({ book: { progress: 1 } });
+        case "/user/notebooks": return reply(notebookPage);
+        case "/book/chapterinfo": return reply({ chapters: [{ chapterUid: 1, title: "第一章" }] });
+        case "/book/bookmarklist": return reply({ updated: [{ bookmarkId: "note", chapterUid: 1, markText: "最新划线" }] });
+        case "/review/list/mine": return reply({ reviews: [], hasMore: 0 });
         default: assert.fail(`Unexpected WeRead API: ${body.api_name}`);
       }
     }
@@ -76,15 +86,15 @@ function createBackground({ existingPage = true, overwrite = true, useNotionCove
   runInNewContext(bundled.outputFiles[0].text, {
     chrome, fetch, URL, URLSearchParams, TextEncoder, AbortController, Headers, setTimeout, clearTimeout
   });
+  function sendRequest(request) {
+    return new Promise((resolve) => {
+      assert.equal(listener(request, {}, (response) => resolve(JSON.parse(JSON.stringify(response)))), true);
+    });
+  }
   return {
     requests, progress, pageBlocks, childrenById,
-    send(syncHighlights) {
-      return new Promise((resolve) => {
-        assert.equal(listener({ type: "SYNC_BOOKS", books: [book], syncHighlights }, {}, (response) => {
-          resolve(JSON.parse(JSON.stringify(response)));
-        }), true);
-      });
-    }
+    readShelf: () => sendRequest({ type: "FETCH_WEREAD_BOOKS" }),
+    send: (syncHighlights) => sendRequest({ type: "SYNC_BOOKS", books: [book], syncHighlights })
   };
 }
 
@@ -143,4 +153,29 @@ test("勾选同步划线时仍读取笔记本和划线，写入并替换原划�
   assert.ok(!background.pageBlocks.some((block) => block.id === "old-highlights"));
   const root = background.pageBlocks.find((block) => block.type === "callout");
   assert.ok(background.childrenById.get(root.id).some((block) => textOf(block) === "最新划线"));
+});
+
+test("进度和划线接口附带升级通知时，每次操作返回数据和一条提示", async () => {
+  const background = createBackground({ upgradeApis: ["/book/getprogress", "/book/bookmarklist", "/review/list/mine"] });
+  const shelf = await background.readShelf();
+  assert.equal(shelf.ok, true);
+  assert.equal(shelf.data[0].progress, 1);
+  assert.equal(shelf.wereadUpgradeNotice, upgradeMessage);
+
+  assert.deepEqual(await background.send(true), {
+    ok: true, data: { created: 0, updated: 1, skipped: 0, failed: [] }, wereadUpgradeNotice: upgradeMessage
+  });
+  const root = background.pageBlocks.find((block) => block.type === "callout");
+  assert.ok(background.childrenById.get(root.id).some((block) => textOf(block) === "最新划线"));
+  assert.equal((await background.send(false)).wereadUpgradeNotice, undefined);
+});
+
+test("笔记本缺少书籍列表时保留 Notion 原划线", async () => {
+  const background = createBackground({ upgradeApis: ["/user/notebooks"], notebookPage: { errcode: 0, hasMore: 0 } });
+  const before = structuredClone(background.pageBlocks);
+  const result = await background.send(true);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /未返回书籍列表/);
+  assert.deepEqual(background.pageBlocks, before);
+  assert.ok(background.requests.every((request) => request.hostname === "i.weread.qq.com"));
 });
